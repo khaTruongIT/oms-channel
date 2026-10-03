@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsUUID, IsInt, Min } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsInt, Min, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class ReserveStockDto {
@@ -27,4 +27,12 @@ export class ReserveStockDto {
   @IsInt()
   @Min(1)
   quantity: number;
+
+  @ApiProperty({
+    description:
+      'Client-generated key used to safely retry the same reservation',
+  })
+  @IsNotEmpty()
+  @IsString()
+  idempotencyKey: string;
 }

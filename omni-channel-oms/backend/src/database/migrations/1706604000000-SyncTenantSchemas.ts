@@ -1,13 +1,29 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
+interface TenantSchemaRow {
+  schema_name: string;
+}
+
+function isTenantSchemaRow(value: unknown): value is TenantSchemaRow {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const maybeRow = value as Record<string, unknown>;
+  return typeof maybeRow.schema_name === 'string';
+}
+
 export class SyncTenantSchemas1706604000000 implements MigrationInterface {
   name = 'SyncTenantSchemas1706604000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // 1. Get all tenants
-    const tenants = await queryRunner.query(
+    const tenantRows = (await queryRunner.query(
       `SELECT schema_name FROM public.tenants`,
-    );
+    )) as unknown;
+    const tenants = Array.isArray(tenantRows)
+      ? tenantRows.filter(isTenantSchemaRow)
+      : [];
 
     // 2. Iterate and sync tables
     for (const tenant of tenants) {
@@ -38,6 +54,7 @@ export class SyncTenantSchemas1706604000000 implements MigrationInterface {
           product_name VARCHAR(255) NOT NULL,
           category_id UUID REFERENCES "${schemaName}".categories(id),
           variants JSONB,
+          public_metadata JSONB,
           cost_price DECIMAL(10, 2),
           created_at TIMESTAMP DEFAULT NOW(),
           deleted_at TIMESTAMP
@@ -60,10 +77,12 @@ export class SyncTenantSchemas1706604000000 implements MigrationInterface {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
           warehouse_id UUID REFERENCES "${schemaName}".warehouses(id),
-          quantity INT NOT NULL DEFAULT 0,
-          reserved_quantity INT NOT NULL DEFAULT 0,
-          safety_stock INT NOT NULL DEFAULT 0,
-          updated_at TIMESTAMP DEFAULT NOW()
+          quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+          reserved_quantity INT NOT NULL DEFAULT 0 CHECK (reserved_quantity >= 0),
+          safety_stock INT NOT NULL DEFAULT 0 CHECK (safety_stock >= 0),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          CONSTRAINT chk_inventory_reserved_lte_quantity CHECK (reserved_quantity <= quantity),
+          CONSTRAINT uq_inventory_sku_warehouse UNIQUE (master_sku_id, warehouse_id)
         )
       `);
 
@@ -142,7 +161,7 @@ export class SyncTenantSchemas1706604000000 implements MigrationInterface {
     }
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public async down(): Promise<void> {
     // We do not drop tables in Sync migration as it might cause data loss.
     // This migration is intended to be additive/fixing.
   }

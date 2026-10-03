@@ -23,6 +23,12 @@ export interface UpdateProfileDto {
   email?: string;
 }
 
+// Storage keys for tenant data
+const TENANT_STORAGE_KEYS = {
+  TENANT_ROLES: "@oms_tenant_roles",
+  SELECTED_TENANT: "@oms_selected_tenant",
+};
+
 class AuthService {
   /**
    * Login user
@@ -92,7 +98,8 @@ class AuthService {
     await AsyncStorage.multiRemove([
       STORAGE_KEYS.ACCESS_TOKEN,
       STORAGE_KEYS.USER,
-      STORAGE_KEYS.SELECTED_TENANT,
+      TENANT_STORAGE_KEYS.TENANT_ROLES,
+      TENANT_STORAGE_KEYS.SELECTED_TENANT,
     ]);
   }
 
@@ -120,18 +127,39 @@ class AuthService {
   }
 
   /**
+   * Get stored tenant roles
+   */
+  async getStoredTenantRoles(): Promise<any[]> {
+    const rolesJson = await AsyncStorage.getItem(
+      TENANT_STORAGE_KEYS.TENANT_ROLES,
+    );
+    return rolesJson ? JSON.parse(rolesJson) : [];
+  }
+
+  /**
+   * Get stored selected tenant
+   */
+  async getStoredSelectedTenant(): Promise<any | null> {
+    const tenantJson = await AsyncStorage.getItem(
+      TENANT_STORAGE_KEYS.SELECTED_TENANT,
+    );
+    return tenantJson ? JSON.parse(tenantJson) : null;
+  }
+
+  /**
    * Store authentication data
    */
   private async storeAuthData(authData: AuthResponse): Promise<void> {
     await AsyncStorage.multiSet([
       [STORAGE_KEYS.ACCESS_TOKEN, authData.access_token],
       [STORAGE_KEYS.USER, JSON.stringify(authData.user)],
+      [TENANT_STORAGE_KEYS.TENANT_ROLES, JSON.stringify(authData.tenantRoles)],
     ]);
 
     // Store first tenant as selected tenant if available
     if (authData.tenantRoles && authData.tenantRoles.length > 0) {
       await AsyncStorage.setItem(
-        STORAGE_KEYS.SELECTED_TENANT,
+        TENANT_STORAGE_KEYS.SELECTED_TENANT,
         JSON.stringify(authData.tenantRoles[0].tenant),
       );
     }

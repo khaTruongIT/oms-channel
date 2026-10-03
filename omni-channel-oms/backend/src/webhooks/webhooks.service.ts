@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { WebhookOrderDto } from './dto/webhook-order.dto';
 import { ShopeeService } from '../integrations/shopee/shopee.service';
@@ -6,6 +11,17 @@ import { TiktokService } from '../integrations/tiktok/tiktok.service';
 import { LazadaService } from '../integrations/lazada/lazada.service';
 import { ChannelMappingsService } from '../channel-mappings/channel-mappings.service';
 import { OrdersService } from '../orders/orders.service';
+import { ChannelAccountsService } from '../channel-accounts/channel-accounts.service';
+import { ChannelAccountStatus } from '../database/entities/channel-account.entity';
+
+type LegacyWebhookResult =
+  | { status: 'skipped'; reason: string }
+  | { status: 'success'; orderNumber: string; orderId: string }
+  | { status: 'duplicate'; message: string };
+
+interface WarehouseRow {
+  id: string;
+}
 
 @Injectable()
 export class WebhooksService {
@@ -18,13 +34,40 @@ export class WebhooksService {
     private readonly lazadaService: LazadaService,
     private readonly channelMappingsService: ChannelMappingsService,
     private readonly ordersService: OrdersService,
+    private readonly channelAccountsService: ChannelAccountsService,
   ) {}
+
+  async receiveShopeeWebhook(
+    callbackId: string,
+    rawBody: Buffer,
+    headers: Record<string, string | string[] | undefined>,
+  ): Promise<never> {
+    const account =
+      await this.channelAccountsService.findForWebhook(callbackId);
+    const receivedSignature = headers['x-shopee-signature'];
+    const hasSignature =
+      typeof receivedSignature === 'string' ||
+      (Array.isArray(receivedSignature) && receivedSignature.length > 0);
+
+    if (account.status !== ChannelAccountStatus.CONNECTED || !hasSignature) {
+      throw new ServiceUnavailableException(
+        'Shopee webhook verification is unavailable until the Partner contract is configured',
+      );
+    }
+
+    // Never infer a signing algorithm or delivery id. This is deliberately
+    // fail-closed until the official Partner contract supplies both values.
+    void rawBody;
+    throw new ServiceUnavailableException(
+      'Shopee webhook verifier is not configured for this account',
+    );
+  }
 
   async handleOrderWebhook(
     webhookOrderDto: WebhookOrderDto,
     schemaName: string,
     userId: string,
-  ): Promise<any> {
+  ): Promise<LegacyWebhookResult> {
     const {
       channel,
       orderId,
@@ -60,7 +103,7 @@ export class WebhooksService {
     }
 
     // Get default warehouse (first active warehouse)
-    const warehouses = await this.dataSource.query(
+    const warehouses = await this.dataSource.query<WarehouseRow[]>(
       `SELECT id FROM "${schemaName}".warehouses WHERE is_active = TRUE LIMIT 1`,
     );
 
@@ -100,8 +143,8 @@ export class WebhooksService {
         orderNumber: order.orderNumber,
         orderId: order.id,
       };
-    } catch (error: any) {
-      if (error.message?.includes('already exists')) {
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message.includes('already exists')) {
         this.logger.warn(`Order ${orderId} already exists (idempotency check)`);
         return {
           status: 'duplicate',

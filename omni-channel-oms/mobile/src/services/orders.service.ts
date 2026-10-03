@@ -42,6 +42,25 @@ class OrdersService {
     id: string,
     data: UpdateOrderStatusDto,
   ): Promise<Order> {
+    // First, get current order to validate transition
+    const currentOrder = await this.getOrderById(id);
+
+    // Import validation utility
+    const {
+      isValidStatusTransition,
+      getInvalidTransitionMessage,
+    } = require("@utils/orderStatusValidation");
+
+    // Validate status transition
+    if (!isValidStatusTransition(currentOrder.status, data.status)) {
+      const errorMessage = getInvalidTransitionMessage(
+        currentOrder.status,
+        data.status,
+      );
+      throw new Error(errorMessage);
+    }
+
+    // Proceed with update if validation passes
     const response = await apiClient.put<Order>(`/orders/${id}/status`, data);
     return response.data;
   }

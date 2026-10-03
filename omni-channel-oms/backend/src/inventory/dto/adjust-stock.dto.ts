@@ -40,4 +40,12 @@ export class AdjustStockDto {
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @ApiProperty({
+    description:
+      'Client-generated key used to safely retry the same adjustment',
+  })
+  @IsNotEmpty()
+  @IsString()
+  idempotencyKey: string;
 }

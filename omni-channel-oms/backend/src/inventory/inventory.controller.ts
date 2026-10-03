@@ -4,7 +4,6 @@ import {
   Post,
   Body,
   Param,
-  Query,
   UseGuards,
   Request,
   NotFoundException,
@@ -16,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../database/entities/user-tenant-role.entity';
+import type { AuthenticatedRequest } from '../auth/interfaces/authenticated-request.interface';
 import {
   ApiTags,
   ApiOperation,
@@ -34,7 +34,7 @@ export class InventoryController {
   @ApiOperation({ summary: 'Get all inventory' })
   @ApiResponse({ status: 200, description: 'Returns all inventory records' })
   @Get()
-  async getAllInventory(@Request() req) {
+  async getAllInventory(@Request() req: AuthenticatedRequest) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
@@ -52,7 +52,7 @@ export class InventoryController {
   })
   @Get('product/:masterSkuId')
   async getInventoryByProduct(
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Param('masterSkuId') masterSkuId: string,
   ) {
     const schemaName = req.user.schemaName;
@@ -72,7 +72,7 @@ export class InventoryController {
   })
   @Get('warehouse/:warehouseId')
   async getInventoryByWarehouse(
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Param('warehouseId') warehouseId: string,
   ) {
     const schemaName = req.user.schemaName;
@@ -92,7 +92,10 @@ export class InventoryController {
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @Post('adjust')
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
-  async adjustStock(@Request() req, @Body() adjustStockDto: AdjustStockDto) {
+  async adjustStock(
+    @Request() req: AuthenticatedRequest,
+    @Body() adjustStockDto: AdjustStockDto,
+  ) {
     const schemaName = req.user.schemaName;
     const userId = req.user.userId;
 
@@ -112,13 +115,20 @@ export class InventoryController {
   @ApiResponse({ status: 400, description: 'Insufficient stock' })
   @Post('reserve')
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER, UserRole.SALES_STAFF)
-  async reserveStock(@Request() req, @Body() reserveStockDto: ReserveStockDto) {
+  async reserveStock(
+    @Request() req: AuthenticatedRequest,
+    @Body() reserveStockDto: ReserveStockDto,
+  ) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
       throw new NotFoundException('Tenant schema not found');
     }
 
-    return this.inventoryService.reserveStock(reserveStockDto, schemaName);
+    return this.inventoryService.reserveManualStock(
+      reserveStockDto,
+      req.user.userId,
+      schemaName,
+    );
   }
 }

@@ -4,6 +4,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { User } from './entities/user.entity';
 import { Tenant } from './entities/tenant.entity';
 import { UserTenantRole } from './entities/user-tenant-role.entity';
+import { RefreshToken } from './entities/refresh-token.entity';
+import { ChannelAccount } from './entities/channel-account.entity';
 
 @Module({
   imports: [
@@ -21,7 +23,13 @@ import { UserTenantRole } from './entities/user-tenant-role.entity';
           username: configService.get('POSTGRES_USER', 'oms_user'),
           password: configService.get('POSTGRES_PASSWORD', 'oms_password'),
           database: configService.get('POSTGRES_DB', 'oms_production'),
-          entities: [User, Tenant, UserTenantRole],
+          entities: [
+            User,
+            Tenant,
+            UserTenantRole,
+            RefreshToken,
+            ChannelAccount,
+          ],
           migrations: [__dirname + '/migrations/*{.ts,.js}'],
           synchronize: false, // Never use synchronize - use migrations instead
           migrationsRun: isDevOrLocal, // Auto-run migrations in dev/local
@@ -30,7 +38,13 @@ import { UserTenantRole } from './entities/user-tenant-role.entity';
         };
       },
     }),
-    TypeOrmModule.forFeature([User, Tenant, UserTenantRole]),
+    TypeOrmModule.forFeature([
+      User,
+      Tenant,
+      UserTenantRole,
+      RefreshToken,
+      ChannelAccount,
+    ]),
   ],
   exports: [TypeOrmModule],
 })

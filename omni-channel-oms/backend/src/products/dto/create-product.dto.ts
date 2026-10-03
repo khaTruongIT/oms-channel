@@ -5,8 +5,11 @@ import {
   IsNumber,
   IsArray,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ProductPublicMetadataDto } from './product-public-metadata.dto';
 
 export class CreateProductDto {
   @ApiProperty({
@@ -58,4 +61,13 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   categoryName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Public optical/SEO metadata used by the mat_kinh storefront',
+    type: ProductPublicMetadataDto,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => ProductPublicMetadataDto)
+  publicMetadata?: ProductPublicMetadataDto;
 }

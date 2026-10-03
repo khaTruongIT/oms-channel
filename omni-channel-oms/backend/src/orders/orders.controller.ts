@@ -41,12 +41,18 @@ export class OrdersController {
   async createOrder(@Request() req, @Body() createOrderDto: CreateOrderDto) {
     const schemaName = req.user.schemaName;
     const userId = req.user.userId;
+    const tenantId = req.user.tenantId;
 
-    if (!schemaName) {
+    if (!schemaName || !tenantId) {
       throw new NotFoundException('Tenant schema not found');
     }
 
-    return this.ordersService.createOrder(createOrderDto, userId, schemaName);
+    return this.ordersService.createOrder(
+      createOrderDto,
+      userId,
+      schemaName,
+      tenantId,
+    );
   }
 
   @ApiOperation({ summary: 'Get all orders' })

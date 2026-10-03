@@ -7,6 +7,10 @@ import { DataSource } from 'typeorm';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { ReserveStockDto } from './dto/reserve-stock.dto';
 
+export interface QueryExecutor {
+  query<T = unknown>(query: string, parameters?: unknown[]): Promise<T>;
+}
+
 export interface InventoryItem {
   id: string;
   masterSkuId: string;
@@ -18,6 +22,22 @@ export interface InventoryItem {
   updatedAt: Date;
 }
 
+interface InventoryRow {
+  id: string;
+  master_sku_id: string;
+  warehouse_id: string;
+  quantity: string | number;
+  reserved_quantity: string | number;
+  safety_stock: string | number;
+  updated_at: Date | string;
+}
+
+interface ReservationInput {
+  masterSkuId: string;
+  warehouseId: string;
+  quantity: number;
+}
+
 @Injectable()
 export class InventoryService {
   constructor(private readonly dataSource: DataSource) {}
@@ -26,32 +46,32 @@ export class InventoryService {
     masterSkuId: string,
     schemaName: string,
   ): Promise<InventoryItem[]> {
-    const results = await this.dataSource.query(
+    const results = await this.dataSource.query<InventoryRow[]>(
       `SELECT * FROM "${schemaName}".inventory WHERE master_sku_id = $1`,
       [masterSkuId],
     );
 
-    return results.map(this.mapToInventoryItem);
+    return results.map((row) => this.mapToInventoryItem(row));
   }
 
   async getInventoryByWarehouse(
     warehouseId: string,
     schemaName: string,
   ): Promise<InventoryItem[]> {
-    const results = await this.dataSource.query(
+    const results = await this.dataSource.query<InventoryRow[]>(
       `SELECT * FROM "${schemaName}".inventory WHERE warehouse_id = $1`,
       [warehouseId],
     );
 
-    return results.map(this.mapToInventoryItem);
+    return results.map((row) => this.mapToInventoryItem(row));
   }
 
   async getAllInventory(schemaName: string): Promise<InventoryItem[]> {
-    const results = await this.dataSource.query(
+    const results = await this.dataSource.query<InventoryRow[]>(
       `SELECT * FROM "${schemaName}".inventory ORDER BY updated_at DESC`,
     );
 
-    return results.map(this.mapToInventoryItem);
+    return results.map((row) => this.mapToInventoryItem(row));
   }
 
   async adjustStock(
@@ -60,76 +80,109 @@ export class InventoryService {
     schemaName: string,
   ): Promise<InventoryItem> {
     const { masterSkuId, warehouseId, quantity, reason } = adjustStockDto;
+    const idempotencyKey = adjustStockDto.idempotencyKey;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    // Check if inventory record exists
-    const existing = await this.dataSource.query(
-      `SELECT * FROM "${schemaName}".inventory 
-       WHERE master_sku_id = $1 AND warehouse_id = $2`,
-      [masterSkuId, warehouseId],
-    );
-
-    let result;
-
-    if (existing.length === 0) {
-      // Create new inventory record
-      if (quantity < 0) {
-        throw new BadRequestException(
-          'Cannot create inventory with negative quantity',
-        );
+    try {
+      const priorMovement = (await queryRunner.query(
+        `SELECT inventory_id FROM "${schemaName}".inventory_movements
+         WHERE idempotency_key = $1`,
+        [idempotencyKey],
+      )) as Array<{ inventory_id: string }>;
+      if (priorMovement.length > 0) {
+        const priorInventory = (await queryRunner.query(
+          `SELECT * FROM "${schemaName}".inventory WHERE id = $1`,
+          [priorMovement[0].inventory_id],
+        )) as InventoryRow[];
+        if (priorInventory.length === 0) {
+          throw new NotFoundException('Inventory record not found');
+        }
+        await queryRunner.commitTransaction();
+        return this.mapToInventoryItem(priorInventory[0]);
       }
 
-      result = await this.dataSource.query(
-        `INSERT INTO "${schemaName}".inventory (master_sku_id, warehouse_id, quantity, reserved_quantity, safety_stock)
-         VALUES ($1, $2, $3, 0, 0)
-         RETURNING *`,
-        [masterSkuId, warehouseId, quantity],
-      );
-    } else {
-      // Update existing inventory
-      const currentQty = existing[0].quantity;
-      const newQty = currentQty + quantity;
+      const existing = (await queryRunner.query(
+        `SELECT * FROM "${schemaName}".inventory
+         WHERE master_sku_id = $1 AND warehouse_id = $2 FOR UPDATE`,
+        [masterSkuId, warehouseId],
+      )) as InventoryRow[];
+      const result =
+        existing.length === 0
+          ? await this.createInventoryRecord(
+              schemaName,
+              adjustStockDto,
+              queryRunner,
+            )
+          : await this.updateInventoryQuantity(
+              schemaName,
+              existing[0],
+              adjustStockDto,
+              queryRunner,
+            );
 
-      if (newQty < 0) {
-        throw new BadRequestException('Insufficient stock for adjustment');
-      }
-
-      result = await this.dataSource.query(
-        `UPDATE "${schemaName}".inventory
-         SET quantity = $1, updated_at = NOW()
-         WHERE master_sku_id = $2 AND warehouse_id = $3
-         RETURNING *`,
-        [newQty, masterSkuId, warehouseId],
+      await queryRunner.query(
+        `INSERT INTO "${schemaName}".inventory_movements
+         (inventory_id, master_sku_id, warehouse_id, movement_type, quantity_delta, reserved_delta, idempotency_key, actor_user_id, metadata)
+         VALUES ($1, $2, $3, 'ADJUST', $4, 0, $5, $6, $7)`,
+        [
+          result.id,
+          masterSkuId,
+          warehouseId,
+          quantity,
+          idempotencyKey,
+          userId,
+          JSON.stringify({ reason: reason ?? null }),
+        ],
       );
+      await this.logAudit(
+        userId,
+        'STOCK_ADJUSTMENT',
+        'inventory',
+        result.id,
+        {
+          masterSkuId,
+          warehouseId,
+          adjustment: quantity,
+          reason,
+          newQuantity: result.quantity,
+        },
+        schemaName,
+        queryRunner,
+      );
+      await queryRunner.commitTransaction();
+      return this.mapToInventoryItem(result);
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
-
-    // Log the adjustment
-    await this.logAudit(
-      userId,
-      'STOCK_ADJUSTMENT',
-      'inventory',
-      result[0].id,
-      {
-        masterSkuId,
-        warehouseId,
-        adjustment: quantity,
-        reason,
-        newQuantity: result[0].quantity,
-      },
-      schemaName,
-    );
-
-    return this.mapToInventoryItem(result[0]);
   }
 
   async reserveStock(
-    reserveStockDto: ReserveStockDto,
+    reserveStockDto: ReservationInput,
     schemaName: string,
+    executor: QueryExecutor = this.dataSource,
   ): Promise<InventoryItem> {
     const { masterSkuId, warehouseId, quantity } = reserveStockDto;
 
-    // Get current inventory
-    const existing = await this.dataSource.query(
-      `SELECT * FROM "${schemaName}".inventory 
+    const result = await executor.query<InventoryRow[]>(
+      `UPDATE "${schemaName}".inventory
+       SET reserved_quantity = reserved_quantity + $1, updated_at = NOW()
+       WHERE master_sku_id = $2 AND warehouse_id = $3
+         AND quantity - reserved_quantity - safety_stock >= $1
+       RETURNING *`,
+      [quantity, masterSkuId, warehouseId],
+    );
+
+    if (result.length > 0) {
+      return this.mapToInventoryItem(result[0]);
+    }
+
+    const existing = await executor.query<InventoryRow[]>(
+      `SELECT * FROM "${schemaName}".inventory
        WHERE master_sku_id = $1 AND warehouse_id = $2`,
       [masterSkuId, warehouseId],
     );
@@ -138,25 +191,82 @@ export class InventoryService {
       throw new NotFoundException('Inventory record not found');
     }
 
-    const current = existing[0];
-    const availableQty = current.quantity - current.reserved_quantity;
-
-    if (availableQty < quantity) {
-      throw new BadRequestException(
-        `Insufficient available stock. Available: ${availableQty}, Requested: ${quantity}`,
-      );
-    }
-
-    // Reserve stock
-    const result = await this.dataSource.query(
-      `UPDATE "${schemaName}".inventory
-       SET reserved_quantity = reserved_quantity + $1, updated_at = NOW()
-       WHERE master_sku_id = $2 AND warehouse_id = $3
-       RETURNING *`,
-      [quantity, masterSkuId, warehouseId],
+    const availableQty =
+      Number(existing[0].quantity) -
+      Number(existing[0].reserved_quantity) -
+      Number(existing[0].safety_stock);
+    throw new BadRequestException(
+      `Insufficient available stock. Available: ${availableQty}, Requested: ${quantity}`,
     );
+  }
 
-    return this.mapToInventoryItem(result[0]);
+  async reserveManualStock(
+    reserveStockDto: ReserveStockDto,
+    userId: string,
+    schemaName: string,
+  ): Promise<InventoryItem> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const priorMovement = (await queryRunner.query(
+        `SELECT inventory_id FROM "${schemaName}".inventory_movements
+         WHERE idempotency_key = $1`,
+        [reserveStockDto.idempotencyKey],
+      )) as Array<{ inventory_id: string }>;
+      if (priorMovement.length > 0) {
+        const priorInventory = (await queryRunner.query(
+          `SELECT * FROM "${schemaName}".inventory WHERE id = $1`,
+          [priorMovement[0].inventory_id],
+        )) as InventoryRow[];
+        if (priorInventory.length === 0) {
+          throw new NotFoundException('Inventory record not found');
+        }
+        await queryRunner.commitTransaction();
+        return this.mapToInventoryItem(priorInventory[0]);
+      }
+
+      const inventory = await this.reserveStock(
+        reserveStockDto,
+        schemaName,
+        queryRunner,
+      );
+      await queryRunner.query(
+        `INSERT INTO "${schemaName}".inventory_movements
+         (inventory_id, master_sku_id, warehouse_id, movement_type, quantity_delta, reserved_delta, idempotency_key, actor_user_id, metadata)
+         VALUES ($1, $2, $3, 'RESERVE', 0, $4, $5, $6, $7)`,
+        [
+          inventory.id,
+          reserveStockDto.masterSkuId,
+          reserveStockDto.warehouseId,
+          reserveStockDto.quantity,
+          reserveStockDto.idempotencyKey,
+          userId,
+          JSON.stringify({ source: 'manual-reservation' }),
+        ],
+      );
+      await this.logAudit(
+        userId,
+        'STOCK_RESERVATION',
+        'inventory',
+        inventory.id,
+        {
+          masterSkuId: reserveStockDto.masterSkuId,
+          warehouseId: reserveStockDto.warehouseId,
+          reserved: reserveStockDto.quantity,
+        },
+        schemaName,
+        queryRunner,
+      );
+      await queryRunner.commitTransaction();
+      return inventory;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async releaseReservation(
@@ -164,8 +274,9 @@ export class InventoryService {
     warehouseId: string,
     quantity: number,
     schemaName: string,
+    executor: QueryExecutor = this.dataSource,
   ): Promise<InventoryItem> {
-    const result = await this.dataSource.query(
+    const result = await executor.query<InventoryRow[]>(
       `UPDATE "${schemaName}".inventory
        SET reserved_quantity = GREATEST(0, reserved_quantity - $1), updated_at = NOW()
        WHERE master_sku_id = $2 AND warehouse_id = $3
@@ -186,10 +297,10 @@ export class InventoryService {
     quantity: number,
     userId: string,
     schemaName: string,
+    executor: QueryExecutor = this.dataSource,
   ): Promise<InventoryItem> {
-    // Get current inventory
-    const existing = await this.dataSource.query(
-      `SELECT * FROM "${schemaName}".inventory 
+    const existing = await executor.query<InventoryRow[]>(
+      `SELECT * FROM "${schemaName}".inventory
        WHERE master_sku_id = $1 AND warehouse_id = $2`,
       [masterSkuId, warehouseId],
     );
@@ -198,14 +309,11 @@ export class InventoryService {
       throw new NotFoundException('Inventory record not found');
     }
 
-    const current = existing[0];
-
-    if (current.reserved_quantity < quantity) {
+    if (Number(existing[0].reserved_quantity) < quantity) {
       throw new BadRequestException('Insufficient reserved stock');
     }
 
-    // Deduct from both quantity and reserved_quantity
-    const result = await this.dataSource.query(
+    const result = await executor.query<InventoryRow[]>(
       `UPDATE "${schemaName}".inventory
        SET quantity = quantity - $1,
            reserved_quantity = reserved_quantity - $1,
@@ -215,7 +323,6 @@ export class InventoryService {
       [quantity, masterSkuId, warehouseId],
     );
 
-    // Log the deduction
     await this.logAudit(
       userId,
       'STOCK_DEDUCTION',
@@ -228,9 +335,79 @@ export class InventoryService {
         newQuantity: result[0].quantity,
       },
       schemaName,
+      executor,
     );
 
     return this.mapToInventoryItem(result[0]);
+  }
+
+  async restockStock(
+    masterSkuId: string,
+    warehouseId: string,
+    quantity: number,
+    schemaName: string,
+    executor: QueryExecutor = this.dataSource,
+  ): Promise<InventoryItem> {
+    const result = await executor.query<InventoryRow[]>(
+      `UPDATE "${schemaName}".inventory
+       SET quantity = quantity + $1, updated_at = NOW()
+       WHERE master_sku_id = $2 AND warehouse_id = $3
+       RETURNING *`,
+      [quantity, masterSkuId, warehouseId],
+    );
+
+    if (result.length === 0) {
+      throw new NotFoundException('Inventory record not found');
+    }
+
+    return this.mapToInventoryItem(result[0]);
+  }
+
+  private async createInventoryRecord(
+    schemaName: string,
+    adjustStockDto: AdjustStockDto,
+    executor: QueryExecutor = this.dataSource,
+  ): Promise<InventoryRow> {
+    const { masterSkuId, warehouseId, quantity } = adjustStockDto;
+
+    if (quantity < 0) {
+      throw new BadRequestException(
+        'Cannot create inventory with negative quantity',
+      );
+    }
+
+    const result = await executor.query<InventoryRow[]>(
+      `INSERT INTO "${schemaName}".inventory (master_sku_id, warehouse_id, quantity, reserved_quantity, safety_stock)
+       VALUES ($1, $2, $3, 0, 0)
+       RETURNING *`,
+      [masterSkuId, warehouseId, quantity],
+    );
+
+    return result[0];
+  }
+
+  private async updateInventoryQuantity(
+    schemaName: string,
+    current: InventoryRow,
+    adjustStockDto: AdjustStockDto,
+    executor: QueryExecutor = this.dataSource,
+  ): Promise<InventoryRow> {
+    const { masterSkuId, warehouseId, quantity } = adjustStockDto;
+    const newQty = Number(current.quantity) + quantity;
+
+    if (newQty < 0 || newQty < Number(current.reserved_quantity)) {
+      throw new BadRequestException('Insufficient stock for adjustment');
+    }
+
+    const result = await executor.query<InventoryRow[]>(
+      `UPDATE "${schemaName}".inventory
+       SET quantity = $1, updated_at = NOW()
+       WHERE master_sku_id = $2 AND warehouse_id = $3
+       RETURNING *`,
+      [newQty, masterSkuId, warehouseId],
+    );
+
+    return result[0];
   }
 
   private async logAudit(
@@ -238,19 +415,20 @@ export class InventoryService {
     action: string,
     entityType: string,
     entityId: string,
-    changes: any,
+    changes: unknown,
     schemaName: string,
+    executor: QueryExecutor = this.dataSource,
   ): Promise<void> {
-    await this.dataSource.query(
+    await executor.query(
       `INSERT INTO "${schemaName}".audit_logs (user_id, action, entity_type, entity_id, changes)
        VALUES ($1, $2, $3, $4, $5)`,
       [userId, action, entityType, entityId, JSON.stringify(changes)],
     );
   }
 
-  private mapToInventoryItem(row: any): InventoryItem {
-    const quantity = parseInt(row.quantity);
-    const reservedQuantity = parseInt(row.reserved_quantity);
+  private mapToInventoryItem(row: InventoryRow): InventoryItem {
+    const quantity = Number(row.quantity);
+    const reservedQuantity = Number(row.reserved_quantity);
 
     return {
       id: row.id,
@@ -258,9 +436,15 @@ export class InventoryService {
       warehouseId: row.warehouse_id,
       quantity,
       reservedQuantity,
-      safetyStock: parseInt(row.safety_stock),
-      availableQuantity: quantity - reservedQuantity,
-      updatedAt: row.updated_at,
+      safetyStock: Number(row.safety_stock),
+      availableQuantity: Math.max(
+        0,
+        quantity - reservedQuantity - Number(row.safety_stock),
+      ),
+      updatedAt:
+        row.updated_at instanceof Date
+          ? row.updated_at
+          : new Date(row.updated_at),
     };
   }
 }

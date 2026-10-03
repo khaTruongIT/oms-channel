@@ -10,6 +10,13 @@ export class CreateChannelMappingDto {
   @IsString()
   masterSkuId: string;
 
+  @ApiPropertyOptional({
+    description: 'Connected channel account for this external SKU mapping',
+  })
+  @IsOptional()
+  @IsString()
+  channelAccountId?: string;
+
   @ApiProperty({
     description: 'Sales channel',
     example: 'shopee',

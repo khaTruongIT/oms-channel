@@ -24,6 +24,9 @@ interface ButtonProps {
   fullWidth?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  enableHaptic?: boolean;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -36,7 +39,17 @@ export const Button: React.FC<ButtonProps> = ({
   fullWidth = false,
   style,
   textStyle,
+  accessibilityLabel,
+  accessibilityHint,
+  enableHaptic = true,
 }) => {
+  const handlePress = () => {
+    if (enableHaptic) {
+      const { haptics } = require("@utils/haptics");
+      haptics.light();
+    }
+    onPress();
+  };
   const buttonStyles = [
     styles.button,
     styles[variant],
@@ -56,9 +69,13 @@ export const Button: React.FC<ButtonProps> = ({
   return (
     <TouchableOpacity
       style={buttonStyles}
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled || loading}
       activeOpacity={0.7}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: disabled || loading }}
     >
       {loading ? (
         <ActivityIndicator

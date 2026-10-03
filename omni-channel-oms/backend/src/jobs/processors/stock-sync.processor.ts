@@ -3,9 +3,6 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bull';
 import { DataSource } from 'typeorm';
 import { StockSyncJob } from '../dto/job-data.interface';
-import { ShopeeService } from '../../integrations/shopee/shopee.service';
-import { TiktokService } from '../../integrations/tiktok/tiktok.service';
-import { LazadaService } from '../../integrations/lazada/lazada.service';
 import { ChannelMappingsService } from '../../channel-mappings/channel-mappings.service';
 
 interface SyncResult {
@@ -16,15 +13,16 @@ interface SyncResult {
   error?: string;
 }
 
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'Unknown stock sync error';
+}
+
 @Processor('stock-sync')
 export class StockSyncProcessor {
   private readonly logger = new Logger(StockSyncProcessor.name);
 
   constructor(
     private readonly dataSource: DataSource,
-    private readonly shopeeService: ShopeeService,
-    private readonly tiktokService: TiktokService,
-    private readonly lazadaService: LazadaService,
     private readonly channelMappingsService: ChannelMappingsService,
   ) {}
 
@@ -55,12 +53,8 @@ export class StockSyncProcessor {
       // Update stock on all mapped channels
       for (const mapping of mappings) {
         try {
-          const service = this.getMarketplaceService(mapping.channel);
-
-          await service.updateStock(
-            mapping.externalItemId,
-            mapping.externalVariantId || null,
-            quantity,
+          throw new Error(
+            `No production ${mapping.channel} stock publisher is configured; mock adapters are disabled for pilot sync`,
           );
 
           results.push({
@@ -73,16 +67,29 @@ export class StockSyncProcessor {
           this.logger.log(
             `Updated stock on ${mapping.channel} for item ${mapping.externalItemId}: ${quantity}`,
           );
-        } catch (error: any) {
+        } catch (error: unknown) {
+          await this.dataSource.query(
+            `INSERT INTO "${schemaName}".integration_exceptions
+             (exception_type, severity, message, context)
+             VALUES ('STOCK_SYNC_FAILED', 'HIGH', $1, $2)`,
+            [
+              getErrorMessage(error),
+              JSON.stringify({
+                masterSkuId,
+                channel: mapping.channel,
+                externalItemId: mapping.externalItemId,
+              }),
+            ],
+          );
           this.logger.error(
-            `Failed to update stock on ${mapping.channel}: ${error.message}`,
-            error.stack,
+            `Failed to update stock on ${mapping.channel}: ${getErrorMessage(error)}`,
+            error instanceof Error ? error.stack : undefined,
           );
 
           results.push({
             channel: mapping.channel,
             itemId: mapping.externalItemId,
-            error: error.message,
+            error: getErrorMessage(error),
             status: 'failed',
           });
         }
@@ -101,25 +108,12 @@ export class StockSyncProcessor {
         quantity,
         results,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       this.logger.error(
-        `Stock sync job ${job.id} failed: ${error.message}`,
-        error.stack,
+        `Stock sync job ${job.id} failed: ${getErrorMessage(error)}`,
+        error instanceof Error ? error.stack : undefined,
       );
       throw error;
-    }
-  }
-
-  private getMarketplaceService(channel: string) {
-    switch (channel) {
-      case 'shopee':
-        return this.shopeeService;
-      case 'tiktok':
-        return this.tiktokService;
-      case 'lazada':
-        return this.lazadaService;
-      default:
-        throw new Error(`Unknown channel: ${channel}`);
     }
   }
 }

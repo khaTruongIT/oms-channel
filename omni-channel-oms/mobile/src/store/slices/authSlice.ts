@@ -61,8 +61,10 @@ export const loadStoredAuth = createAsyncThunk(
       }
 
       const user = await authService.getStoredUser();
-      // TODO: Load tenant roles from storage
-      return { user, tenantRoles: [] };
+      const tenantRoles = await authService.getStoredTenantRoles();
+      const selectedTenant = await authService.getStoredSelectedTenant();
+
+      return { user, tenantRoles, selectedTenant };
     } catch (error) {
       return rejectWithValue((error as ApiError).message);
     }
@@ -129,7 +131,6 @@ const authSlice = createSlice({
         state.error = action.payload as string;
       });
 
-    // Load stored auth
     builder
       .addCase(loadStoredAuth.pending, (state) => {
         state.isLoading = true;
@@ -140,6 +141,7 @@ const authSlice = createSlice({
           state.isAuthenticated = true;
           state.user = action.payload.user;
           state.tenantRoles = action.payload.tenantRoles;
+          state.selectedTenant = action.payload.selectedTenant;
         }
       })
       .addCase(loadStoredAuth.rejected, (state) => {

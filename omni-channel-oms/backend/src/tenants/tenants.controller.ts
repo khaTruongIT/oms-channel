@@ -15,6 +15,7 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { CreateTenantsDto } from './dto/create-tenants.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import type { AuthenticatedRequest } from '../auth/interfaces/authenticated-request.interface';
 import {
   ApiTags,
   ApiOperation,
@@ -37,7 +38,10 @@ export class TenantsController {
   @ApiResponse({ status: 201, description: 'Tenant successfully created' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @Post()
-  async createTenant(@Request() req, @Body() createTenantDto: CreateTenantDto) {
+  async createTenant(
+    @Request() req: AuthenticatedRequest,
+    @Body() createTenantDto: CreateTenantDto,
+  ) {
     return this.tenantsService.createTenant(req.user.userId, createTenantDto);
   }
 
@@ -46,7 +50,7 @@ export class TenantsController {
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @Post('bulk')
   async createTenants(
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Body() createTenantsDto: CreateTenantsDto,
   ) {
     return this.tenantsService.createTenants(
@@ -58,7 +62,7 @@ export class TenantsController {
   @ApiOperation({ summary: 'Get user tenants' })
   @ApiResponse({ status: 200, description: 'Returns list of user tenants' })
   @Get()
-  async getTenants(@Request() req) {
+  async getTenants(@Request() req: AuthenticatedRequest) {
     return this.tenantsService.getTenantsByUser(req.user.userId);
   }
 
@@ -67,8 +71,11 @@ export class TenantsController {
   @ApiResponse({ status: 404, description: 'Tenant not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @Get(':id')
-  async getTenantById(@Param('id', ParseUUIDPipe) id: string) {
-    return this.tenantsService.getTenantById(id);
+  async getTenantById(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    return this.tenantsService.getTenantForUser(id, req.user.userId);
   }
 
   @ApiOperation({ summary: 'Update tenant details' })
@@ -80,7 +87,7 @@ export class TenantsController {
   @Patch(':id')
   async updateTenant(
     @Param('id', ParseUUIDPipe) id: string,
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Body() updateTenantDto: UpdateTenantDto,
   ) {
     return this.tenantsService.updateTenant(
@@ -97,7 +104,11 @@ export class TenantsController {
   @ApiResponse({ status: 404, description: 'Tenant not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @Get(':id/status')
-  async getTenantStatus(@Param('id', ParseUUIDPipe) id: string) {
+  async getTenantStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    await this.tenantsService.assertUserCanAccessTenant(req.user.userId, id);
     return this.tenantsService.getTenantStatus(id);
   }
 
@@ -108,7 +119,10 @@ export class TenantsController {
   @ApiResponse({ status: 404, description: 'Tenant not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @Post(':id/activate')
-  async activateTenant(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+  async activateTenant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.tenantsService.activateTenant(id, req.user.userId);
   }
 
@@ -121,7 +135,7 @@ export class TenantsController {
   @Post(':id/suspend')
   async suspendTenant(
     @Param('id', ParseUUIDPipe) id: string,
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Body('reason') reason: string,
   ) {
     return this.tenantsService.suspendTenant(id, req.user.userId, reason);
@@ -134,7 +148,10 @@ export class TenantsController {
   @ApiResponse({ status: 404, description: 'Tenant not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @Post(':id/cancel')
-  async cancelTenant(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+  async cancelTenant(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
     return this.tenantsService.cancelTenant(id, req.user.userId);
   }
 
@@ -150,7 +167,7 @@ export class TenantsController {
   @Post(':id/complete-onboarding')
   async completeOnboarding(
     @Param('id', ParseUUIDPipe) id: string,
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
   ) {
     return this.tenantsService.completeOnboarding(id, req.user.userId);
   }
@@ -165,7 +182,11 @@ export class TenantsController {
   @ApiResponse({ status: 404, description: 'Tenant not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid' })
   @Get(':id/usage')
-  async getUsageStats(@Param('id', ParseUUIDPipe) id: string) {
+  async getUsageStats(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Request() req: AuthenticatedRequest,
+  ) {
+    await this.tenantsService.assertUserCanAccessTenant(req.user.userId, id);
     return this.tenantLimitsService.getUsageStats(id);
   }
 }

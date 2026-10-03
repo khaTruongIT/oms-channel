@@ -50,6 +50,13 @@ export class CreateOrderDto {
   @IsString()
   channel: string;
 
+  @ApiPropertyOptional({
+    description: 'Connected channel account that owns the external order',
+  })
+  @IsOptional()
+  @IsString()
+  channelAccountId?: string;
+
   @ApiProperty({
     description: 'External order ID from channel',
     example: 'SHOPEE-ORD-12345',

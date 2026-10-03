@@ -1,6 +1,5 @@
 import {
   Injectable,
-  ConflictException,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -123,6 +122,29 @@ export class TenantsService {
     return tenant;
   }
 
+  async assertUserCanAccessTenant(
+    userId: string,
+    tenantId: string,
+  ): Promise<void> {
+    await this.getTenantById(tenantId);
+
+    const userRole = await this.getUserRoleInTenant(userId, tenantId);
+    if (!userRole) {
+      throw new ForbiddenException('You do not have access to this tenant');
+    }
+  }
+
+  async getTenantForUser(tenantId: string, userId: string): Promise<Tenant> {
+    const tenant = await this.getTenantById(tenantId);
+
+    const userRole = await this.getUserRoleInTenant(userId, tenantId);
+    if (!userRole) {
+      throw new ForbiddenException('You do not have access to this tenant');
+    }
+
+    return tenant;
+  }
+
   async getUserRoleInTenant(
     userId: string,
     tenantId: string,
@@ -162,6 +184,7 @@ export class TenantsService {
           product_name VARCHAR(255) NOT NULL,
           category_id UUID REFERENCES "${schemaName}".categories(id),
           variants JSONB,
+          public_metadata JSONB,
           cost_price DECIMAL(10, 2),
           created_at TIMESTAMP DEFAULT NOW(),
           deleted_at TIMESTAMP
@@ -182,10 +205,12 @@ export class TenantsService {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
           warehouse_id UUID REFERENCES "${schemaName}".warehouses(id),
-          quantity INT NOT NULL DEFAULT 0,
-          reserved_quantity INT NOT NULL DEFAULT 0,
-          safety_stock INT NOT NULL DEFAULT 0,
-          updated_at TIMESTAMP DEFAULT NOW()
+          quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+          reserved_quantity INT NOT NULL DEFAULT 0 CHECK (reserved_quantity >= 0),
+          safety_stock INT NOT NULL DEFAULT 0 CHECK (safety_stock >= 0),
+          updated_at TIMESTAMP DEFAULT NOW(),
+          CONSTRAINT chk_inventory_reserved_lte_quantity CHECK (reserved_quantity <= quantity),
+          CONSTRAINT uq_inventory_sku_warehouse UNIQUE (master_sku_id, warehouse_id)
         )
       `);
 
@@ -193,6 +218,7 @@ export class TenantsService {
         CREATE TABLE IF NOT EXISTS "${schemaName}".channel_mappings (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
+          channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE CASCADE,
           channel VARCHAR(50) NOT NULL,
           external_item_id VARCHAR(255) NOT NULL,
           external_variant_id VARCHAR(255),
@@ -205,13 +231,16 @@ export class TenantsService {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           order_number VARCHAR(100) UNIQUE NOT NULL,
           channel VARCHAR(50) NOT NULL,
+          channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
           external_order_id VARCHAR(255) NOT NULL,
           customer_name VARCHAR(255),
           customer_phone VARCHAR(50),
           status VARCHAR(50) NOT NULL,
           total_amount DECIMAL(10, 2),
           created_at TIMESTAMP DEFAULT NOW(),
-          synced_at TIMESTAMP
+          synced_at TIMESTAMP,
+          external_status VARCHAR(100),
+          external_updated_at TIMESTAMP
         )
       `);
 
@@ -220,6 +249,7 @@ export class TenantsService {
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           order_id UUID REFERENCES "${schemaName}".orders(id),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
+          warehouse_id UUID REFERENCES "${schemaName}".warehouses(id),
           quantity INT NOT NULL,
           unit_price DECIMAL(10, 2),
           subtotal DECIMAL(10, 2)
@@ -239,6 +269,85 @@ export class TenantsService {
         )
       `);
 
+      await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".inventory_movements (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          inventory_id UUID NOT NULL REFERENCES "${schemaName}".inventory(id),
+          master_sku_id UUID NOT NULL REFERENCES "${schemaName}".master_skus(id),
+          warehouse_id UUID NOT NULL REFERENCES "${schemaName}".warehouses(id),
+          order_id UUID REFERENCES "${schemaName}".orders(id),
+          movement_type VARCHAR(30) NOT NULL,
+          quantity_delta INT NOT NULL,
+          reserved_delta INT NOT NULL DEFAULT 0,
+          idempotency_key VARCHAR(255) NOT NULL UNIQUE,
+          actor_user_id UUID,
+          metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".webhook_inbox (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          channel_account_id UUID NOT NULL REFERENCES public.channel_accounts(id) ON DELETE CASCADE,
+          provider VARCHAR(50) NOT NULL,
+          delivery_id VARCHAR(255) NOT NULL,
+          payload JSONB NOT NULL,
+          received_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          processed_at TIMESTAMP,
+          status VARCHAR(30) NOT NULL DEFAULT 'RECEIVED',
+          attempt_count INT NOT NULL DEFAULT 0,
+          last_error VARCHAR(500),
+          UNIQUE(channel_account_id, delivery_id)
+        )
+      `);
+
+      await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".outbox_events (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE CASCADE,
+          event_type VARCHAR(100) NOT NULL,
+          aggregate_type VARCHAR(50) NOT NULL,
+          aggregate_id UUID NOT NULL,
+          payload JSONB NOT NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+          attempts INT NOT NULL DEFAULT 0,
+          available_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          processed_at TIMESTAMP,
+          last_error VARCHAR(500),
+          created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".integration_exceptions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
+          exception_type VARCHAR(100) NOT NULL,
+          severity VARCHAR(20) NOT NULL DEFAULT 'MEDIUM',
+          status VARCHAR(30) NOT NULL DEFAULT 'OPEN',
+          message VARCHAR(500) NOT NULL,
+          context JSONB NOT NULL DEFAULT '{}'::jsonb,
+          retry_count INT NOT NULL DEFAULT 0,
+          resolved_by UUID,
+          resolved_at TIMESTAMP,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".reconciliation_runs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
+          status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+          started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          completed_at TIMESTAMP,
+          findings_count INT NOT NULL DEFAULT 0,
+          summary JSONB NOT NULL DEFAULT '{}'::jsonb
+        )
+      `);
+
       // Create indexes
       await queryRunner.query(
         `CREATE INDEX IF NOT EXISTS idx_master_skus_sku_code ON "${schemaName}".master_skus(sku_code)`,
@@ -254,6 +363,18 @@ export class TenantsService {
       );
       await queryRunner.query(
         `CREATE INDEX IF NOT EXISTS idx_orders_channel ON "${schemaName}".orders(channel)`,
+      );
+      await queryRunner.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_account_external_order_unique ON "${schemaName}".orders(channel_account_id, external_order_id) WHERE channel_account_id IS NOT NULL`,
+      );
+      await queryRunner.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_legacy_channel_external_order_unique ON "${schemaName}".orders(channel, external_order_id) WHERE channel_account_id IS NULL`,
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS idx_webhook_inbox_status ON "${schemaName}".webhook_inbox(status, received_at)`,
+      );
+      await queryRunner.query(
+        `CREATE INDEX IF NOT EXISTS idx_outbox_events_ready ON "${schemaName}".outbox_events(status, available_at)`,
       );
       await queryRunner.query(
         `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON "${schemaName}".audit_logs(entity_type, entity_id)`,

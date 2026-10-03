@@ -5,34 +5,29 @@
 
 import React, { useEffect } from "react";
 import { NavigationContainer } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
-import { useAppSelector } from "@store/hooks";
-import { SplashScreen } from "@screens/SplashScreen";
+import { useAppDispatch, useAppSelector } from "@store/hooks";
+import { loadStoredAuth } from "@store/slices/authSlice";
 import { AuthNavigator } from "./AuthNavigator";
 import { MainNavigator } from "./MainNavigator";
-
-export type RootStackParamList = {
-  Splash: undefined;
-  Auth: undefined;
-  Main: undefined;
-};
-
-const Stack = createStackNavigator<RootStackParamList>();
+import { SplashScreen } from "@screens/SplashScreen";
+import { navigationRef } from "@services/navigation.service";
 
 export const RootNavigator: React.FC = () => {
+  const dispatch = useAppDispatch();
   const { isAuthenticated, isLoading } = useAppSelector((state) => state.auth);
 
+  useEffect(() => {
+    // Load stored authentication on app start
+    dispatch(loadStoredAuth());
+  }, [dispatch]);
+
+  if (isLoading) {
+    return <SplashScreen />;
+  }
+
   return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {isLoading ? (
-          <Stack.Screen name="Splash" component={SplashScreen} />
-        ) : isAuthenticated ? (
-          <Stack.Screen name="Main" component={MainNavigator} />
-        ) : (
-          <Stack.Screen name="Auth" component={AuthNavigator} />
-        )}
-      </Stack.Navigator>
+    <NavigationContainer ref={navigationRef}>
+      {isAuthenticated ? <MainNavigator /> : <AuthNavigator />}
     </NavigationContainer>
   );
 };

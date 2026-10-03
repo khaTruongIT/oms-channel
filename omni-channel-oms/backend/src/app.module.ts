@@ -16,8 +16,13 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { JobsModule } from './jobs/jobs.module';
 import { AuditModule } from './common/audit/audit.module';
+import { HealthModule } from './health/health.module';
+import { ChannelAccountsModule } from './channel-accounts/channel-accounts.module';
+import { IntegrationOperationsModule } from './integration-operations/integration-operations.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
+import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
+import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
 
 @Module({
   imports: [
@@ -38,6 +43,9 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
     WebhooksModule,
     JobsModule,
     AuditModule,
+    HealthModule,
+    ChannelAccountsModule,
+    IntegrationOperationsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -50,6 +58,12 @@ import { LoggerMiddleware } from './common/middleware/logger.middleware';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(LoggerMiddleware).forRoutes('*');
+    consumer
+      .apply(
+        RequestContextMiddleware,
+        SecurityHeadersMiddleware,
+        LoggerMiddleware,
+      )
+      .forRoutes('*');
   }
 }

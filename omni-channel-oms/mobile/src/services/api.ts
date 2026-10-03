@@ -69,7 +69,9 @@ apiClient.interceptors.response.use(
     // Log response in development
     if (__DEV__) {
       console.log(
-        `[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`,
+        `[API Response] ${response.config.method?.toUpperCase()} ${
+          response.config.url
+        }`,
         {
           status: response.status,
           data: response.data,
@@ -98,8 +100,9 @@ apiClient.interceptors.response.use(
         STORAGE_KEYS.SELECTED_TENANT,
       ]);
 
-      // TODO: Navigate to login screen
-      // This will be handled by Redux store listener
+      // Navigate to login screen
+      const { reset } = require("./navigation.service");
+      reset("Auth");
     }
 
     // Return formatted error

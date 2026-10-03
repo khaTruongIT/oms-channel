@@ -6,6 +6,7 @@ import {
 import { DataSource } from 'typeorm';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { ProductPublicMetadata } from './dto/product-public-metadata.dto';
 
 export interface MasterSku {
   id: string;
@@ -15,6 +16,7 @@ export interface MasterSku {
   categoryName?: string;
   variants?: any;
   costPrice?: number;
+  publicMetadata?: ProductPublicMetadata;
   createdAt: Date;
   deletedAt?: Date;
 }
@@ -34,6 +36,7 @@ export class ProductsService {
       costPrice,
       categoryId,
       categoryName,
+      publicMetadata,
     } = createProductDto;
 
     // Resolve Category ID
@@ -79,8 +82,8 @@ export class ProductsService {
     }
 
     const result = await this.dataSource.query(
-      `INSERT INTO "${schemaName}".master_skus (sku_code, product_name, variants, cost_price, category_id)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO "${schemaName}".master_skus (sku_code, product_name, variants, cost_price, category_id, public_metadata)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
       [
         skuCode,
@@ -88,6 +91,7 @@ export class ProductsService {
         variants ? JSON.stringify(variants) : null,
         costPrice,
         finalCategoryId,
+        publicMetadata ?? null,
       ],
     );
 
@@ -128,7 +132,14 @@ export class ProductsService {
     updateProductDto: UpdateProductDto,
     schemaName: string,
   ): Promise<MasterSku> {
-    const { productName, variants, costPrice, categoryId } = updateProductDto;
+    const {
+      productName,
+      variants,
+      costPrice,
+      categoryId,
+      categoryName,
+      publicMetadata,
+    } = updateProductDto;
 
     // Check if product exists
     await this.getProductById(id, schemaName);
@@ -152,19 +163,42 @@ export class ProductsService {
       values.push(costPrice);
     }
 
-    if (categoryId !== undefined) {
+    let finalCategoryId = categoryId;
+    if (categoryName !== undefined) {
+      const existingCategory = await this.dataSource.query(
+        `SELECT id FROM "${schemaName}".categories WHERE name = $1`,
+        [categoryName],
+      );
+
+      if (existingCategory.length > 0) {
+        finalCategoryId = existingCategory[0].id;
+      } else {
+        const newCategory = await this.dataSource.query(
+          `INSERT INTO "${schemaName}".categories (name) VALUES ($1) RETURNING id`,
+          [categoryName],
+        );
+        finalCategoryId = newCategory[0].id;
+      }
+    }
+
+    if (finalCategoryId !== undefined) {
       // Verify category exists if not null
-      if (categoryId) {
+      if (finalCategoryId) {
         const existingCategory = await this.dataSource.query(
           `SELECT id FROM "${schemaName}".categories WHERE id = $1`,
-          [categoryId],
+          [finalCategoryId],
         );
         if (existingCategory.length === 0) {
           throw new NotFoundException('Category not found');
         }
       }
       updates.push(`category_id = $${paramIndex++}`);
-      values.push(categoryId);
+      values.push(finalCategoryId);
+    }
+
+    if (publicMetadata !== undefined) {
+      updates.push(`public_metadata = $${paramIndex++}`);
+      values.push(publicMetadata);
     }
 
     if (updates.length === 0) {
@@ -209,8 +243,29 @@ export class ProductsService {
       categoryName: row.category_name, // Mapped from join
       variants: row.variants,
       costPrice: row.cost_price ? parseFloat(row.cost_price) : undefined,
+      publicMetadata: this.mapPublicMetadata(row.public_metadata),
       createdAt: row.created_at,
       deletedAt: row.deleted_at,
     };
+  }
+
+  private mapPublicMetadata(value: unknown): ProductPublicMetadata | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value) as ProductPublicMetadata;
+      } catch {
+        return undefined;
+      }
+    }
+
+    if (typeof value === 'object') {
+      return value as ProductPublicMetadata;
+    }
+
+    return undefined;
   }
 }

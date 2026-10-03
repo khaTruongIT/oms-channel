@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: optiqis-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: optiqis
+      POSTGRES_PASSWORD: optiqis
+      POSTGRES_DB: optiqis
+    ports:
+      - "5432:5432"
+    volumes:
+      - optiqis-postgres:/var/lib/postgresql/data
+
+volumes:
+  optiqis-postgres:

@@ -16,6 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { UserRole } from '../database/entities/user-tenant-role.entity';
+import type { AuthenticatedRequest } from '../auth/interfaces/authenticated-request.interface';
 import {
   ApiTags,
   ApiOperation,
@@ -40,18 +41,20 @@ export class ChannelMappingsController {
   @Post()
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async createMapping(
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Body() createChannelMappingDto: CreateChannelMappingDto,
   ) {
     const schemaName = req.user.schemaName;
+    const tenantId = req.user.tenantId;
 
-    if (!schemaName) {
+    if (!schemaName || !tenantId) {
       throw new NotFoundException('Tenant schema not found');
     }
 
     return this.channelMappingsService.createMapping(
       createChannelMappingDto,
       schemaName,
+      tenantId,
     );
   }
 
@@ -63,7 +66,10 @@ export class ChannelMappingsController {
   })
   @ApiResponse({ status: 200, description: 'Returns list of channel mappings' })
   @Get()
-  async getAllMappings(@Request() req, @Query('channel') channel?: string) {
+  async getAllMappings(
+    @Request() req: AuthenticatedRequest,
+    @Query('channel') channel?: string,
+  ) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
@@ -85,7 +91,7 @@ export class ChannelMappingsController {
   @ApiResponse({ status: 200, description: 'Returns mappings for the product' })
   @Get('product/:masterSkuId')
   async getMappingsByProduct(
-    @Request() req,
+    @Request() req: AuthenticatedRequest,
     @Param('masterSkuId') masterSkuId: string,
   ) {
     const schemaName = req.user.schemaName;
@@ -106,7 +112,10 @@ export class ChannelMappingsController {
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @Delete(':id')
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
-  async deleteMapping(@Request() req, @Param('id') id: string) {
+  async deleteMapping(
+    @Request() req: AuthenticatedRequest,
+    @Param('id') id: string,
+  ) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
