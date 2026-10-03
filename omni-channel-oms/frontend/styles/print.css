@@ -1,0 +1,188 @@
+/**
+ * Print-specific styles
+ * Optimized layouts for printing invoices and packing slips
+ */
+
+@media print {
+  /* Hide non-printable elements */
+  header,
+  nav,
+  aside,
+  footer,
+  .no-print,
+  button,
+  .sidebar {
+    display: none !important;
+  }
+
+  /* Reset page margins */
+  @page {
+    margin: 0.5in;
+    size: letter portrait;
+  }
+
+  body {
+    margin: 0;
+    padding: 0;
+    background: white;
+    color: black;
+  }
+
+  /* Ensure content fits on page */
+  .print-container {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Prevent page breaks inside elements */
+  .print-no-break {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Force page breaks */
+  .print-page-break {
+    page-break-after: always;
+    break-after: page;
+  }
+
+  /* Typography for print */
+  h1 {
+    font-size: 24pt;
+    margin-bottom: 12pt;
+  }
+
+  h2 {
+    font-size: 18pt;
+    margin-bottom: 10pt;
+  }
+
+  h3 {
+    font-size: 14pt;
+    margin-bottom: 8pt;
+  }
+
+  p,
+  td,
+  th {
+    font-size: 11pt;
+    line-height: 1.4;
+  }
+
+  /* Table styles */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12pt 0;
+  }
+
+  th,
+  td {
+    padding: 8pt;
+    border: 1pt solid #ddd;
+    text-align: left;
+  }
+
+  th {
+    background-color: #f3f4f6 !important;
+    font-weight: bold;
+  }
+
+  /* Remove shadows and backgrounds */
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  /* Ensure links are visible */
+  a {
+    color: black;
+    text-decoration: underline;
+  }
+
+  /* Invoice specific */
+  .invoice-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 24pt;
+    padding-bottom: 12pt;
+    border-bottom: 2pt solid #000;
+  }
+
+  .invoice-logo {
+    max-width: 150pt;
+    height: auto;
+  }
+
+  .invoice-details {
+    text-align: right;
+  }
+
+  .invoice-items {
+    margin: 24pt 0;
+  }
+
+  .invoice-total {
+    margin-top: 24pt;
+    padding-top: 12pt;
+    border-top: 2pt solid #000;
+    text-align: right;
+  }
+
+  /* Packing slip specific */
+  .packing-slip-header {
+    text-align: center;
+    margin-bottom: 24pt;
+    padding-bottom: 12pt;
+    border-bottom: 2pt solid #000;
+  }
+
+  .packing-slip-barcode {
+    text-align: center;
+    margin: 24pt 0;
+  }
+
+  /* QR Code / Barcode */
+  .print-barcode {
+    max-width: 200pt;
+    height: auto;
+    margin: 12pt auto;
+  }
+
+  /* Signature line */
+  .signature-line {
+    margin-top: 48pt;
+    padding-top: 12pt;
+    border-top: 1pt solid #000;
+    width: 200pt;
+  }
+
+  /* Footer */
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 9pt;
+    color: #666;
+    padding: 12pt 0;
+    border-top: 1pt solid #ddd;
+  }
+}
+
+/* Print button (visible on screen, hidden in print) */
+.print-button {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+}
+
+@media print {
+  .print-button {
+    display: none !important;
+  }
+}
