@@ -15,9 +15,10 @@ export const dataSourceOptions: DataSourceOptions = {
   password: process.env.POSTGRES_PASSWORD || 'oms_password',
   database: process.env.POSTGRES_DB || 'oms_production',
   entities: [__dirname + '/entities/*.entity{.ts,.js}'],
-  migrations: [__dirname + '/migrations/*{.ts,.js}'],
+  migrations: [__dirname + '/migrations/[0-9]*-!(*.spec){.ts,.js}'],
   synchronize: false, // Never use synchronize - use migrations
   migrationsRun: isDevOrLocal, // Auto-run migrations in dev/local
+  migrationsTransactionMode: 'each',
   logging: isDevOrLocal,
   schema: 'public',
 };

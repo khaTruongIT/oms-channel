@@ -30,9 +30,10 @@ import { ChannelAccount } from './entities/channel-account.entity';
             RefreshToken,
             ChannelAccount,
           ],
-          migrations: [__dirname + '/migrations/*{.ts,.js}'],
+          migrations: [__dirname + '/migrations/[0-9]*-!(*.spec){.ts,.js}'],
           synchronize: false, // Never use synchronize - use migrations instead
           migrationsRun: isDevOrLocal, // Auto-run migrations in dev/local
+          migrationsTransactionMode: 'each',
           logging: isDevOrLocal,
           schema: 'public',
         };
