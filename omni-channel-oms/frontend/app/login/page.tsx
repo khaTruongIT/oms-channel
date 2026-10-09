@@ -29,7 +29,7 @@ export default function LoginPage() {
     try {
       await authService.login(data);
       toast.success("Login successful!");
-      router.push("/");
+      router.replace("/");
     } catch (error: unknown) {
       toast.error(getApiErrorMessage(error, "Login failed"));
     } finally {
