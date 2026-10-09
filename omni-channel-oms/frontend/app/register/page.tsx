@@ -5,27 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { authService } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api-error";
-
-const registerSchema = z
-  .object({
-    firstName: z.string("Name must be at least 2 characters"),
-    lastName: z.string("Name must be at least 2 characters"),
-    email: z.string().email("Invalid email address"),
-    password: z.string().min(6, "Password must be at least 6 characters"),
-    confirmPassword: z.string(),
-  })
-  .refine((data) => data.password === data.confirmPassword, {
-    message: "Passwords don't match",
-    path: ["confirmPassword"],
-  });
-
-type RegisterForm = z.infer<typeof registerSchema>;
+import { registerSchema, type RegisterForm } from "@/lib/auth-validation";
 
 export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
@@ -48,8 +33,8 @@ export default function RegisterPage() {
         email: data.email,
         password: data.password,
       });
-      toast.success("Registration successful! Please login.");
-      router.push("/login");
+      toast.success("Account created. Complete your store setup to continue.");
+      router.replace("/tenants");
     } catch (error: unknown) {
       toast.error(getApiErrorMessage(error, "Registration failed"));
     } finally {

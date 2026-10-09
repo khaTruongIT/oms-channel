@@ -5,19 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { toast } from "sonner";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import { authService } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/api-error";
-
-const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
-
-type LoginForm = z.infer<typeof loginSchema>;
+import { loginSchema, type LoginForm } from "@/lib/auth-validation";
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
