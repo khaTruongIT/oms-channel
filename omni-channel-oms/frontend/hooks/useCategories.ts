@@ -1,5 +1,5 @@
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface Category {
   id: string;
@@ -20,7 +20,7 @@ export interface UpdateCategoryData {
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
 export function useCategories() {
-  const { data, error, isLoading, mutate } = useSWR<Category[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Category[]>(
     "/categories",
     fetcher,
   );

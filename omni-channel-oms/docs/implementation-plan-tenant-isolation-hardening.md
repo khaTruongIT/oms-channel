@@ -1,7 +1,7 @@
 ---
 title: Tenant Isolation Hardening
 description: Close cross-tenant job access and stale client cache paths before multi-tenant beta.
-status: in-progress
+status: complete
 priority: critical
 effort: M
 branch: main
@@ -66,3 +66,9 @@ sequenceDiagram
 - Pending tenants must remain accessible because creation currently starts onboarding in `PENDING`; only `SUSPENDED`, `CANCELLED`, and inactive tenants are blocked.
 - Existing jobs without a tenant ID are intentionally unreadable after deployment. New jobs receive a required tenant ID.
 - Cache key changes cause a one-time refetch after deploy. Rollback is code-only; no migration is required.
+
+## Verification
+
+- Backend: focused lint, 19 Jest suites, and production build pass.
+- Frontend: focused lint, Vitest cache-key tests, TypeScript check, and production build pass.
+- Repository-wide lint remains outside the slice because of pre-existing errors in unrelated modules.

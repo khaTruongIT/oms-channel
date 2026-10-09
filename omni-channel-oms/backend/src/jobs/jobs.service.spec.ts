@@ -35,6 +35,23 @@ function createJob(tenantId: string) {
 }
 
 describe('JobsService.getJobStatus', () => {
+  it('adds the tenant ID to stock-sync jobs', async () => {
+    const add = jest.fn().mockResolvedValue({ id: 'stock-job-1' });
+    const stockSyncQueue = {
+      add,
+    } as unknown as Queue;
+    const service = new JobsService(stockSyncQueue, {} as Queue);
+
+    await expect(
+      service.queueStockSync('sku-1', 'warehouse-1', 4, 'tenant_one', tenantA),
+    ).resolves.toEqual({ jobId: 'stock-job-1', status: 'queued' });
+    expect(add).toHaveBeenCalledWith(
+      'sync-product-stock',
+      expect.objectContaining({ tenantId: tenantA }),
+      expect.any(Object),
+    );
+  });
+
   it('rejects queue names outside the allowlist', async () => {
     const { service } = buildService(null);
 
@@ -51,6 +68,14 @@ describe('JobsService.getJobStatus', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('returns not found when the requested job does not exist', async () => {
+    const { service } = buildService(null);
+
+    await expect(
+      service.getJobStatus('batch-sync', 'job-1', tenantA),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('returns the state for a job owned by the requesting tenant', async () => {
     const { service } = buildService(createJob(tenantA));
 
@@ -61,5 +86,16 @@ describe('JobsService.getJobStatus', () => {
       state: 'completed',
       result: { synced: 3 },
     });
+  });
+
+  it('returns a stock-sync job when it belongs to the requesting tenant', async () => {
+    const stockSyncQueue = {
+      getJob: jest.fn().mockResolvedValue(createJob(tenantA)),
+    } as unknown as Queue;
+    const service = new JobsService(stockSyncQueue, {} as Queue);
+
+    await expect(
+      service.getJobStatus('stock-sync', 'job-1', tenantA),
+    ).resolves.toMatchObject({ jobId: 'job-1', state: 'completed' });
   });
 });

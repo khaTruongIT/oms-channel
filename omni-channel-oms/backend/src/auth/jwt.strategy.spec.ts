@@ -13,10 +13,7 @@ import {
 const userId = 'user-1';
 const tenantId = 'tenant-1';
 
-type UserTenantRoleRepositoryMock = Pick<
-  Repository<UserTenantRole>,
-  'findOne'
->;
+type UserTenantRoleRepositoryMock = Pick<Repository<UserTenantRole>, 'findOne'>;
 
 function createRequest(headerTenantId?: string): Request {
   return {
@@ -61,7 +58,6 @@ function buildStrategy(membership: UserTenantRole | null): {
       configService,
       authService,
       userTenantRoleRepository as unknown as Repository<UserTenantRole>,
-      {} as Repository<Tenant>,
     ),
     userTenantRoleRepository,
   };
@@ -74,14 +70,13 @@ describe('JwtStrategy tenant context', () => {
   };
 
   it('uses the database membership role for a header-selected active tenant', async () => {
-    const { strategy, userTenantRoleRepository } = buildStrategy(
-      createMembership(),
-    );
+    const { strategy, userTenantRoleRepository } =
+      buildStrategy(createMembership());
 
-    const context = await strategy.validate(
-      createRequest(tenantId),
-      { ...payload, role: UserRole.OWNER },
-    );
+    const context = await strategy.validate(createRequest(tenantId), {
+      ...payload,
+      role: UserRole.OWNER,
+    });
 
     expect(context).toMatchObject({
       tenantId,
@@ -101,9 +96,40 @@ describe('JwtStrategy tenant context', () => {
       createMembership(TenantStatus.SUSPENDED, false),
     );
 
-    await expect(strategy.validate(createRequest(tenantId), payload)).rejects.toBeInstanceOf(
-      UnauthorizedException,
+    await expect(
+      strategy.validate(createRequest(tenantId), payload),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects a cancelled tenant selected by request header', async () => {
+    const { strategy } = buildStrategy(
+      createMembership(TenantStatus.CANCELLED, false),
     );
+
+    await expect(
+      strategy.validate(createRequest(tenantId), payload),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('rejects an inactive tenant selected by request header', async () => {
+    const { strategy } = buildStrategy(
+      createMembership(TenantStatus.ACTIVE, false),
+    );
+
+    await expect(
+      strategy.validate(createRequest(tenantId), payload),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('keeps pending tenants available during onboarding', async () => {
+    const { strategy } = buildStrategy(createMembership(TenantStatus.PENDING));
+
+    await expect(
+      strategy.validate(createRequest(tenantId), payload),
+    ).resolves.toMatchObject({
+      tenantId,
+      role: UserRole.WAREHOUSE_MANAGER,
+    });
   });
 
   it('rejects a tenant supplied by a token when membership is absent', async () => {
@@ -120,5 +146,15 @@ describe('JwtStrategy tenant context', () => {
     await expect(
       strategy.validate(createRequest('tenant-2'), { ...payload, tenantId }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('returns an authenticated user without tenant context when none is requested', async () => {
+    const { strategy, userTenantRoleRepository } = buildStrategy(null);
+
+    await expect(strategy.validate(createRequest(), payload)).resolves.toEqual({
+      userId,
+      email: payload.email,
+    });
+    expect(userTenantRoleRepository.findOne).not.toHaveBeenCalled();
   });
 });

@@ -1,12 +1,12 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface ProductVariant {
   size?: string;
   color?: string;
-  [key: string]: any; // Allow additional variant properties
+  [key: string]: unknown;
 }
 
 export interface Product {
@@ -40,7 +40,7 @@ export interface UpdateProductDto {
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
 export function useProducts() {
-  const { data, error, isLoading, mutate } = useSWR<Product[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Product[]>(
     "/products",
     fetcher,
   );
@@ -54,7 +54,7 @@ export function useProducts() {
 }
 
 export function useProduct(id: string) {
-  const { data, error, isLoading, mutate } = useSWR<Product>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Product>(
     id ? `/products/${id}` : null,
     fetcher,
   );

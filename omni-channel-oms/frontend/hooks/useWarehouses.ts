@@ -1,5 +1,5 @@
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface Warehouse {
   id: string;
@@ -21,7 +21,7 @@ export interface CreateWarehouseData {
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
 export function useWarehouses() {
-  const { data, error, isLoading, mutate } = useSWR<Warehouse[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Warehouse[]>(
     "/warehouses",
     fetcher,
   );
@@ -35,7 +35,7 @@ export function useWarehouses() {
 }
 
 export function useWarehouse(id: string) {
-  const { data, error, isLoading, mutate } = useSWR<Warehouse>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Warehouse>(
     id ? `/warehouses/${id}` : null,
     fetcher,
   );

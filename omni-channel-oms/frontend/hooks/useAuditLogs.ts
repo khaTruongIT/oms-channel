@@ -1,5 +1,5 @@
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface AuditLog {
   id: string;
@@ -7,8 +7,8 @@ export interface AuditLog {
   entityId: string;
   action: string;
   userId: string;
-  oldValues?: Record<string, any>;
-  newValues?: Record<string, any>;
+  oldValues?: Record<string, unknown>;
+  newValues?: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -33,7 +33,7 @@ export function useAuditLogs(filters?: AuditLogFilters) {
   const queryString = params.toString();
   const url = `/audit${queryString ? `?${queryString}` : ""}`;
 
-  const { data, error, isLoading, mutate } = useSWR<AuditLog[]>(url, fetcher);
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<AuditLog[]>(url, fetcher);
 
   return {
     logs: data || [],
@@ -44,7 +44,7 @@ export function useAuditLogs(filters?: AuditLogFilters) {
 }
 
 export function useEntityHistory(entityType: string, entityId: string) {
-  const { data, error, isLoading } = useSWR<AuditLog[]>(
+  const { data, error, isLoading } = useTenantScopedSWR<AuditLog[]>(
     entityType && entityId ? `/audit/entity/${entityType}/${entityId}` : null,
     fetcher,
   );

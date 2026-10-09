@@ -7,14 +7,13 @@ import { ConfigService } from '@nestjs/config';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { UserTenantRole } from '../database/entities/user-tenant-role.entity';
-import { Tenant } from '../database/entities/tenant.entity';
+import { TenantStatus } from '../database/entities/tenant.entity';
 import { resolveJwtSecret } from '../config/security.config';
 
 export interface JwtPayload {
   sub: string;
   email: string;
   tenantId?: string;
-  role?: string;
 }
 
 @Injectable()
@@ -24,8 +23,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     private readonly authService: AuthService,
     @InjectRepository(UserTenantRole)
     private readonly userTenantRoleRepository: Repository<UserTenantRole>,
-    @InjectRepository(Tenant)
-    private readonly tenantRepository: Repository<Tenant>,
   ) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
@@ -45,48 +42,67 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('User not found');
     }
 
-    let tenantId = payload.tenantId;
-    let schemaName: string | undefined;
-    let role = payload.role;
+    const tenantId = this.getRequestedTenantId(req, payload);
 
-    // If tenantId is not in token, check header
     if (!tenantId) {
-      const headerTenantId = req.headers['x-tenant-id'];
-      if (headerTenantId && typeof headerTenantId === 'string') {
-        // Verify user has access to this tenant
-        const userTenantRole = await this.userTenantRoleRepository.findOne({
-          where: {
-            userId: user.id,
-            tenantId: headerTenantId,
-          },
-          relations: ['tenant'],
-        });
+      return {
+        userId: payload.sub,
+        email: payload.email,
+      };
+    }
 
-        if (userTenantRole) {
-          tenantId = headerTenantId;
-          schemaName = userTenantRole.tenant.schemaName;
-          role = userTenantRole.role;
-        }
-      }
-    } else {
-      // If tenantId IS in token (future proofing), we might need to fetch schemaName if not in token
-      // But currently we don't put it in token, so we assume header approach primarily.
-      if (!schemaName) {
-        const tenant = await this.tenantRepository.findOne({
-          where: { id: tenantId },
-        });
-        if (tenant) {
-          schemaName = tenant.schemaName;
-        }
-      }
+    const userTenantRole = await this.userTenantRoleRepository.findOne({
+      where: {
+        userId: user.id,
+        tenantId,
+      },
+      relations: ['tenant'],
+    });
+
+    if (!this.canAccessTenant(userTenantRole)) {
+      throw new UnauthorizedException('Tenant access is not authorized');
     }
 
     return {
       userId: payload.sub,
       email: payload.email,
       tenantId,
-      schemaName,
-      role,
+      schemaName: userTenantRole.tenant.schemaName,
+      role: userTenantRole.role,
     };
+  }
+
+  private getRequestedTenantId(
+    req: Request,
+    payload: JwtPayload,
+  ): string | undefined {
+    const headerValue = req.headers['x-tenant-id'];
+    const headerTenantId =
+      typeof headerValue === 'string' ? headerValue : undefined;
+
+    if (
+      payload.tenantId &&
+      headerTenantId &&
+      payload.tenantId !== headerTenantId
+    ) {
+      throw new UnauthorizedException('Tenant context does not match token');
+    }
+
+    return payload.tenantId ?? headerTenantId;
+  }
+
+  private canAccessTenant(
+    userTenantRole: UserTenantRole | null,
+  ): userTenantRole is UserTenantRole {
+    if (!userTenantRole?.tenant) {
+      return false;
+    }
+
+    const { tenant } = userTenantRole;
+    return (
+      tenant.isActive &&
+      tenant.status !== TenantStatus.SUSPENDED &&
+      tenant.status !== TenantStatus.CANCELLED
+    );
   }
 }

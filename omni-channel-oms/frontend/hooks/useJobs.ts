@@ -1,5 +1,5 @@
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface JobStatus {
   id: string;
@@ -7,8 +7,8 @@ export interface JobStatus {
   queue: string;
   state: "waiting" | "active" | "completed" | "failed" | "delayed";
   progress: number;
-  data?: Record<string, any>;
-  result?: Record<string, any>;
+  data?: Record<string, unknown>;
+  result?: Record<string, unknown>;
   failedReason?: string;
   processedOn?: string;
   finishedOn?: string;
@@ -22,7 +22,7 @@ export interface SyncResult {
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
 export function useJobStatus(queueName: string, jobId: string) {
-  const { data, error, isLoading, mutate } = useSWR<JobStatus>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<JobStatus>(
     queueName && jobId ? `/jobs/status/${queueName}/${jobId}` : null,
     fetcher,
     { refreshInterval: 2000 }, // Poll every 2 seconds for active jobs

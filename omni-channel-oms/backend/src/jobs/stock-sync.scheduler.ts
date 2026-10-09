@@ -3,7 +3,15 @@ import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { DataSource } from 'typeorm';
-import type { BatchStockSyncJob } from './dto/job-data.interface';
+import type {
+  BatchStockSyncJob,
+  QueuedJobResponse,
+} from './dto/job-data.interface';
+
+interface ActiveTenantRow {
+  id: string;
+  schema_name: string;
+}
 
 @Injectable()
 export class StockSyncScheduler {
@@ -21,7 +29,7 @@ export class StockSyncScheduler {
 
     try {
       // Get all active tenants
-      const tenants = await this.dataSource.query(
+      const tenants = await this.dataSource.query<ActiveTenantRow[]>(
         `SELECT id, schema_name FROM public.tenants WHERE is_active = TRUE`,
       );
 
@@ -45,16 +53,19 @@ export class StockSyncScheduler {
 
         this.logger.log(`Queued batch sync job for tenant ${tenant.id}`);
       }
-    } catch (error: any) {
-      this.logger.error(
-        `Failed to schedule batch sync: ${error.message}`,
-        error.stack,
-      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const stack = error instanceof Error ? error.stack : undefined;
+
+      this.logger.error(`Failed to schedule batch sync: ${message}`, stack);
     }
   }
 
   // Manual trigger for batch sync
-  async triggerBatchSync(schemaName: string, tenantId: string): Promise<any> {
+  async triggerBatchSync(
+    schemaName: string,
+    tenantId: string,
+  ): Promise<QueuedJobResponse> {
     this.logger.log(`Manually triggering batch sync for tenant ${tenantId}`);
 
     const jobData: BatchStockSyncJob = {

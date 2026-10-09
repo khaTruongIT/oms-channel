@@ -8,14 +8,13 @@ import { AuthController } from './auth.controller';
 import { JwtStrategy } from './jwt.strategy';
 import { User } from '../database/entities/user.entity';
 import { UserTenantRole } from '../database/entities/user-tenant-role.entity';
-import { Tenant } from '../database/entities/tenant.entity';
 import { RefreshToken } from '../database/entities/refresh-token.entity';
 import { TenantsModule } from '../tenants/tenants.module';
 import { resolveJwtSecret } from '../config/security.config';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([User, UserTenantRole, Tenant, RefreshToken]),
+    TypeOrmModule.forFeature([User, UserTenantRole, RefreshToken]),
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],

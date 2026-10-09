@@ -1,7 +1,7 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 
 export interface ChannelMapping {
   id: string;
@@ -45,7 +45,7 @@ function buildMappingsUrl(filters?: ChannelMappingFilters): string {
 }
 
 export function useChannelMappings(filters?: ChannelMappingFilters) {
-  const { data, error, isLoading, mutate } = useSWR<ChannelMapping[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<ChannelMapping[]>(
     buildMappingsUrl(filters),
     fetcher,
   );

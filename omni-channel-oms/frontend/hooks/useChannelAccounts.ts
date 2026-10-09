@@ -1,7 +1,7 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 import type { ChannelAccount, CreateShopeeAccountInput } from "@/types/integration";
 
 export type {
@@ -14,7 +14,7 @@ const fetcher = <T>(url: string): Promise<T> =>
   api.get<T>(url).then((response) => response.data);
 
 export function useChannelAccounts() {
-  const { data, error, isLoading, mutate } = useSWR<ChannelAccount[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<ChannelAccount[]>(
     "/channel-accounts",
     fetcher,
   );

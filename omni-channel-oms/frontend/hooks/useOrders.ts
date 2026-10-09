@@ -1,7 +1,7 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 import type {
   CreateOrderInput,
   Order,
@@ -27,7 +27,7 @@ function buildOrdersUrl(filters?: OrderFilters): string {
 
 export function useOrders(filters?: OrderFilters | string) {
   const url = typeof filters === "string" ? `/orders?channel=${filters}` : buildOrdersUrl(filters);
-  const { data, error, isLoading, mutate } = useSWR<Order[]>(url, fetcher);
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Order[]>(url, fetcher);
 
   return {
     orders: data || [],
@@ -38,7 +38,7 @@ export function useOrders(filters?: OrderFilters | string) {
 }
 
 export function useOrder(id: string) {
-  const { data, error, isLoading, mutate } = useSWR<Order>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<Order>(
     id ? `/orders/${id}` : null,
     fetcher,
   );
@@ -52,7 +52,7 @@ export function useOrder(id: string) {
 }
 
 export function useOrderItems(orderId: string) {
-  const { data, error, isLoading } = useSWR<OrderItem[]>(
+  const { data, error, isLoading } = useTenantScopedSWR<OrderItem[]>(
     orderId ? `/orders/${orderId}/items` : null,
     fetcher,
   );

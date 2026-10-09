@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import useSWR from "swr";
 import api from "@/lib/api";
 
@@ -106,6 +107,7 @@ export interface UpdateTenantInput extends Partial<CreateTenantInput> {
 }
 
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
+const tenantChangedEvent = "tenantChanged";
 
 export function useTenants() {
   const { data, error, isLoading, mutate } = useSWR<Tenant[]>(
@@ -192,16 +194,48 @@ export async function completeOnboarding(tenantId: string) {
 export function getCurrentTenant(): Tenant | null {
   if (typeof window === "undefined") return null;
   const tenantStr = localStorage.getItem("currentTenant");
-  return tenantStr ? JSON.parse(tenantStr) : null;
+  if (!tenantStr) return null;
+
+  try {
+    const parsed: unknown = JSON.parse(tenantStr);
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "id" in parsed &&
+      typeof parsed.id === "string"
+    ) {
+      return parsed as Tenant;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export function setCurrentTenant(tenant: Tenant) {
   localStorage.setItem("currentTenant", JSON.stringify(tenant));
-  // Dispatch custom event for cross-component updates
-  window.dispatchEvent(new CustomEvent("tenantChanged", { detail: tenant }));
+  window.dispatchEvent(new CustomEvent(tenantChangedEvent, { detail: tenant }));
 }
 
 export function clearCurrentTenant() {
   localStorage.removeItem("currentTenant");
-  window.dispatchEvent(new CustomEvent("tenantChanged", { detail: null }));
+  window.dispatchEvent(new CustomEvent(tenantChangedEvent, { detail: null }));
+}
+
+function subscribeToTenantChanges(onStoreChange: () => void): () => void {
+  window.addEventListener(tenantChangedEvent, onStoreChange);
+  return () => window.removeEventListener(tenantChangedEvent, onStoreChange);
+}
+
+function getCurrentTenantId(): string | null {
+  return getCurrentTenant()?.id ?? null;
+}
+
+export function useCurrentTenantId(): string | null {
+  return useSyncExternalStore(
+    subscribeToTenantChanges,
+    getCurrentTenantId,
+    () => null,
+  );
 }

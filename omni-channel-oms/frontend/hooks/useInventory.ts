@@ -1,7 +1,7 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 import type { AdjustStockInput, InventoryItem } from "@/types/inventory";
 
 export type { AdjustStockInput, InventoryItem } from "@/types/inventory";
@@ -9,7 +9,7 @@ export type { AdjustStockInput, InventoryItem } from "@/types/inventory";
 const fetcher = (url: string) => api.get(url).then((res) => res.data);
 
 export function useInventory() {
-  const { data, error, isLoading, mutate } = useSWR<InventoryItem[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<InventoryItem[]>(
     "/inventory",
     fetcher,
   );

@@ -18,7 +18,9 @@ export default function TenantSwitcher({
 }: TenantSwitcherProps) {
   const { tenants, isLoading } = useTenants();
   const [isOpen, setIsOpen] = useState(false);
-  const [currentTenant, setCurrentTenantState] = useState<Tenant | null>(null);
+  const [currentTenant, setCurrentTenantState] = useState<Tenant | null>(
+    getCurrentTenant,
+  );
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Close dropdown when clicking outside
@@ -47,13 +49,15 @@ export default function TenantSwitcher({
     [onTenantChange],
   );
 
-  // Load current tenant from localStorage on mount only
   useEffect(() => {
-    const storedTenant = getCurrentTenant();
-    if (storedTenant && storedTenant.id !== currentTenant?.id) {
-      setCurrentTenant(storedTenant);
-    }
-  }, []); // Only run on mount
+    const handleTenantChange = (event: Event) => {
+      const tenant = (event as CustomEvent<Tenant | null>).detail;
+      setCurrentTenantState(tenant);
+    };
+
+    window.addEventListener("tenantChanged", handleTenantChange);
+    return () => window.removeEventListener("tenantChanged", handleTenantChange);
+  }, []);
 
   // Auto-select first tenant if none selected
   useEffect(() => {

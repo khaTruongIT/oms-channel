@@ -1,7 +1,7 @@
 "use client";
 
-import useSWR from "swr";
 import api from "@/lib/api";
+import { useTenantScopedSWR } from "@/hooks/useTenantScopedSWR";
 import type {
   IntegrationException,
   IntegrationExceptionFilters,
@@ -35,7 +35,7 @@ function buildExceptionQuery(filters?: IntegrationExceptionFilters): string {
 }
 
 export function useIntegrationExceptions(filters?: IntegrationExceptionFilters) {
-  const { data, error, isLoading, mutate } = useSWR<IntegrationException[]>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<IntegrationException[]>(
     buildExceptionQuery(filters),
     fetcher,
   );
@@ -44,7 +44,7 @@ export function useIntegrationExceptions(filters?: IntegrationExceptionFilters) 
 }
 
 export function useIntegrationHealth() {
-  const { data, error, isLoading, mutate } = useSWR<IntegrationHealth>(
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<IntegrationHealth>(
     "/integration-health",
     fetcher,
   );
