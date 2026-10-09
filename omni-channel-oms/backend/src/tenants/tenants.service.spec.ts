@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource, EntityManager, QueryRunner, Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Tenant, TenantStatus } from '../database/entities/tenant.entity';
 import {
   UserRole,
@@ -15,28 +15,32 @@ type UserTenantRoleRepositoryMock = Pick<
   Repository<UserTenantRole>,
   'create' | 'findOne' | 'save'
 >;
-type QueryRunnerMock = Pick<
-  QueryRunner,
-  | 'commitTransaction'
-  | 'connect'
-  | 'query'
-  | 'release'
-  | 'rollbackTransaction'
-  | 'startTransaction'
-> & {
-  manager: Pick<EntityManager, 'save'>;
-};
+interface QueryRunnerMock {
+  commitTransaction: jest.Mock<Promise<void>, []>;
+  connect: jest.Mock<Promise<void>, []>;
+  query: jest.Mock<Promise<unknown>, [string]>;
+  release: jest.Mock<Promise<void>, []>;
+  rollbackTransaction: jest.Mock<Promise<void>, []>;
+  startTransaction: jest.Mock<Promise<void>, []>;
+  manager: {
+    save: jest.Mock<Promise<unknown>, [unknown]>;
+  };
+}
 
-function createQueryRunnerMock(): jest.Mocked<QueryRunnerMock> {
+function createQueryRunnerMock(): QueryRunnerMock {
   return {
-    commitTransaction: jest.fn().mockResolvedValue(undefined),
-    connect: jest.fn().mockResolvedValue(undefined),
-    query: jest.fn().mockResolvedValue(undefined),
-    release: jest.fn().mockResolvedValue(undefined),
-    rollbackTransaction: jest.fn().mockResolvedValue(undefined),
-    startTransaction: jest.fn().mockResolvedValue(undefined),
+    commitTransaction: jest
+      .fn<Promise<void>, []>()
+      .mockResolvedValue(undefined),
+    connect: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+    query: jest.fn<Promise<unknown>, [string]>().mockResolvedValue(undefined),
+    release: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
+    rollbackTransaction: jest
+      .fn<Promise<void>, []>()
+      .mockResolvedValue(undefined),
+    startTransaction: jest.fn<Promise<void>, []>().mockResolvedValue(undefined),
     manager: {
-      save: jest.fn(),
+      save: jest.fn<Promise<unknown>, [unknown]>(),
     },
   };
 }
@@ -122,6 +126,30 @@ describe('TenantsService tenant access', () => {
     expect(userTenantRoleRepository.findOne).not.toHaveBeenCalled();
   });
 
+  it('activates a pending tenant when its owner completes onboarding', async () => {
+    const tenant = createTenant({
+      status: TenantStatus.PENDING,
+      onboardingCompleted: false,
+    });
+    tenantRepository.findOne.mockResolvedValue(tenant);
+    tenantRepository.save.mockResolvedValue(tenant);
+    userTenantRoleRepository.findOne.mockResolvedValue({
+      id: 'role-1',
+      userId: 'owner-1',
+      tenantId: tenant.id,
+      role: UserRole.OWNER,
+    } as UserTenantRole);
+
+    await expect(
+      service.completeOnboarding(tenant.id, 'owner-1'),
+    ).resolves.toMatchObject({
+      status: TenantStatus.ACTIVE,
+      isActive: true,
+      onboardingCompleted: true,
+    });
+    expect(tenantRepository.save).toHaveBeenCalledWith(tenant);
+  });
+
   it('creates inventory table with database-level stock invariants for new tenants', async () => {
     const queryRunner = createQueryRunnerMock();
     const tenant = createTenant();
@@ -151,6 +179,12 @@ describe('TenantsService tenant access', () => {
     expect(queryRunner.commitTransaction).toHaveBeenCalledTimes(1);
     expect(queryRunner.rollbackTransaction).not.toHaveBeenCalled();
     expect(queryRunner.release).toHaveBeenCalledTimes(1);
+    expect(queryRunner.manager.save).toHaveBeenCalledTimes(2);
+    expect(userTenantRoleRepository.create).toHaveBeenCalledWith({
+      userId: 'owner-1',
+      tenantId: tenant.id,
+      role: UserRole.OWNER,
+    });
 
     const inventoryTableSql = queryRunner.query.mock.calls
       .map(([sql]) => sql)

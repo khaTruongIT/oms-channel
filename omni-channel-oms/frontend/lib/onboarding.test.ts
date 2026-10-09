@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { BusinessType } from "@/hooks/useTenants";
 import { buildTenantOnboardingInput } from "./onboarding";
 
 describe("buildTenantOnboardingInput", () => {
@@ -8,7 +9,7 @@ describe("buildTenantOnboardingInput", () => {
         shopName: "  North Star Shop  ",
         businessName: "   ",
         contactEmail: " owner@example.com ",
-        businessType: "retail",
+        businessType: "retail" as BusinessType,
       }),
     ).toEqual({
       shopName: "North Star Shop",

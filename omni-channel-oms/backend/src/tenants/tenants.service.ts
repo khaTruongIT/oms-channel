@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, QueryRunner } from 'typeorm';
 import { Tenant, TenantStatus } from '../database/entities/tenant.entity';
 import {
   UserTenantRole,
@@ -42,21 +42,34 @@ export class TenantsService {
       ...optionalFields,
     });
 
-    await this.tenantRepository.save(tenant);
+    const queryRunner = this.dataSource.createQueryRunner();
+    let transactionStarted = false;
 
-    // Create schema in PostgreSQL
-    await this.createTenantSchema(schemaName);
+    try {
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+      transactionStarted = true;
 
-    // Assign owner role to creator
-    const userTenantRole = this.userTenantRoleRepository.create({
-      userId,
-      tenantId: tenant.id,
-      role: UserRole.OWNER,
-    });
+      const savedTenant = await queryRunner.manager.save(tenant);
+      await this.createTenantSchema(savedTenant.schemaName, queryRunner);
 
-    await this.userTenantRoleRepository.save(userTenantRole);
+      const userTenantRole = this.userTenantRoleRepository.create({
+        userId,
+        tenantId: savedTenant.id,
+        role: UserRole.OWNER,
+      });
+      await queryRunner.manager.save(userTenantRole);
 
-    return tenant;
+      await queryRunner.commitTransaction();
+      return savedTenant;
+    } catch (error: unknown) {
+      if (transactionStarted) {
+        await queryRunner.rollbackTransaction();
+      }
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async createTenants(
@@ -156,16 +169,15 @@ export class TenantsService {
     return userTenantRole?.role || null;
   }
 
-  private async createTenantSchema(schemaName: string): Promise<void> {
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
+  private async createTenantSchema(
+    schemaName: string,
+    queryRunner: QueryRunner,
+  ): Promise<void> {
+    // Create schema
+    await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
 
-    try {
-      // Create schema
-      await queryRunner.query(`CREATE SCHEMA IF NOT EXISTS "${schemaName}"`);
-
-      // Create categories table first (referenced by master_skus)
-      await queryRunner.query(`
+    // Create categories table first (referenced by master_skus)
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".categories (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name VARCHAR(255) NOT NULL,
@@ -176,8 +188,8 @@ export class TenantsService {
         )
       `);
 
-      // Create tables in tenant schema
-      await queryRunner.query(`
+    // Create tables in tenant schema
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".master_skus (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           sku_code VARCHAR(100) UNIQUE NOT NULL,
@@ -191,7 +203,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".warehouses (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           name VARCHAR(255) NOT NULL,
@@ -200,7 +212,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".inventory (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
@@ -214,7 +226,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".channel_mappings (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           master_sku_id UUID REFERENCES "${schemaName}".master_skus(id),
@@ -226,7 +238,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".orders (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           order_number VARCHAR(100) UNIQUE NOT NULL,
@@ -244,7 +256,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".order_items (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           order_id UUID REFERENCES "${schemaName}".orders(id),
@@ -256,7 +268,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".audit_logs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           user_id UUID,
@@ -269,7 +281,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".inventory_movements (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           inventory_id UUID NOT NULL REFERENCES "${schemaName}".inventory(id),
@@ -286,7 +298,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".webhook_inbox (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           channel_account_id UUID NOT NULL REFERENCES public.channel_accounts(id) ON DELETE CASCADE,
@@ -302,7 +314,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".outbox_events (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE CASCADE,
@@ -319,7 +331,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".integration_exceptions (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
@@ -336,7 +348,7 @@ export class TenantsService {
         )
       `);
 
-      await queryRunner.query(`
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".reconciliation_runs (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
@@ -348,40 +360,37 @@ export class TenantsService {
         )
       `);
 
-      // Create indexes
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_master_skus_sku_code ON "${schemaName}".master_skus(sku_code)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_master_skus_category ON "${schemaName}".master_skus(category_id)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_inventory_master_sku ON "${schemaName}".inventory(master_sku_id)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_orders_order_number ON "${schemaName}".orders(order_number)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_orders_channel ON "${schemaName}".orders(channel)`,
-      );
-      await queryRunner.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_account_external_order_unique ON "${schemaName}".orders(channel_account_id, external_order_id) WHERE channel_account_id IS NOT NULL`,
-      );
-      await queryRunner.query(
-        `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_legacy_channel_external_order_unique ON "${schemaName}".orders(channel, external_order_id) WHERE channel_account_id IS NULL`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_webhook_inbox_status ON "${schemaName}".webhook_inbox(status, received_at)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_outbox_events_ready ON "${schemaName}".outbox_events(status, available_at)`,
-      );
-      await queryRunner.query(
-        `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON "${schemaName}".audit_logs(entity_type, entity_id)`,
-      );
-    } finally {
-      await queryRunner.release();
-    }
+    // Create indexes
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_master_skus_sku_code ON "${schemaName}".master_skus(sku_code)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_master_skus_category ON "${schemaName}".master_skus(category_id)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_inventory_master_sku ON "${schemaName}".inventory(master_sku_id)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_orders_order_number ON "${schemaName}".orders(order_number)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_orders_channel ON "${schemaName}".orders(channel)`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_account_external_order_unique ON "${schemaName}".orders(channel_account_id, external_order_id) WHERE channel_account_id IS NOT NULL`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_legacy_channel_external_order_unique ON "${schemaName}".orders(channel, external_order_id) WHERE channel_account_id IS NULL`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_webhook_inbox_status ON "${schemaName}".webhook_inbox(status, received_at)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_outbox_events_ready ON "${schemaName}".outbox_events(status, available_at)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON "${schemaName}".audit_logs(entity_type, entity_id)`,
+    );
   }
 
   // ==================== Status Management ====================

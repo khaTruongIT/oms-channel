@@ -1,7 +1,7 @@
 ---
 title: Self-Service Tenant Onboarding
 description: Make store creation reachable from the UI and atomic across tenant, schema, and owner membership provisioning.
-status: in-progress
+status: complete
 priority: critical
 effort: M
 branch: main
@@ -35,3 +35,8 @@ An authenticated user can create a store from the product UI, the new tenant bec
 - PostgreSQL DDL used by tenant bootstrap is transactional; this design relies on the production database keeping that behavior.
 - A network failure after server-side success may leave the browser on the form. The tenant remains available from My Stores and can be selected there.
 - This slice does not add a background provisioning retry queue; the atomic path removes partial state, making a retry a new create request.
+
+## Verification
+
+- Backend transaction tests cover commit, owner membership creation, rollback, and onboarding activation.
+- Frontend tests cover input normalization; TypeScript and production builds validate the onboarding route.

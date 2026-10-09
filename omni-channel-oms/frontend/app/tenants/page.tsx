@@ -12,21 +12,26 @@ import {
   Building2,
 } from "lucide-react";
 import {
+  completeOnboarding,
   useTenants,
   setCurrentTenant,
   Tenant,
   TenantStatus,
-  TenantPlan,
 } from "@/hooks/useTenants";
 import Button from "@/components/ui/Button";
 import Badge from "@/components/ui/Badge";
 import Modal from "@/components/ui/Modal";
+import { getApiErrorMessage } from "@/lib/api-error";
+import { toast } from "sonner";
 
 export default function TenantsPage() {
   const router = useRouter();
   const { tenants, isLoading } = useTenants();
   const [searchQuery, setSearchQuery] = useState("");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [completingTenantId, setCompletingTenantId] = useState<string | null>(
+    null,
+  );
 
   const filteredTenants = tenants.filter(
     (tenant) =>
@@ -36,7 +41,21 @@ export default function TenantsPage() {
 
   const handleEnterTenant = (tenant: Tenant) => {
     setCurrentTenant(tenant);
-    router.push("/dashboard");
+    router.push("/");
+  };
+
+  const handleResumeSetup = async (tenant: Tenant): Promise<void> => {
+    setCompletingTenantId(tenant.id);
+    try {
+      const activatedTenant = await completeOnboarding(tenant.id);
+      setCurrentTenant(activatedTenant);
+      toast.success("Store setup is complete.");
+      router.push("/");
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, "Unable to finish store setup."));
+    } finally {
+      setCompletingTenantId(null);
+    }
   };
 
   const getStatusBadgeVariant = (status: TenantStatus) => {
@@ -163,14 +182,24 @@ export default function TenantsPage() {
                     <Settings className="w-4 h-4 mr-2" />
                     Manage
                   </Link>
-                  <Button
-                    size="sm"
-                    onClick={() => handleEnterTenant(tenant)}
-                    disabled={tenant.status !== TenantStatus.ACTIVE}
-                  >
-                    Dashboard
-                    <ArrowRight className="w-4 h-4 ml-2" />
-                  </Button>
+                  {tenant.status === TenantStatus.PENDING ? (
+                    <Button
+                      size="sm"
+                      onClick={() => void handleResumeSetup(tenant)}
+                      isLoading={completingTenantId === tenant.id}
+                    >
+                      Resume setup
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={() => handleEnterTenant(tenant)}
+                      disabled={tenant.status !== TenantStatus.ACTIVE}
+                    >
+                      Dashboard
+                      <ArrowRight className="w-4 h-4 ml-2" />
+                    </Button>
+                  )}
                 </div>
               </div>
             ))}
