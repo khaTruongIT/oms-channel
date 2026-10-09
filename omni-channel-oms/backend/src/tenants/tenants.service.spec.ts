@@ -1,5 +1,5 @@
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
-import { DataSource, QueryRunner, Repository } from 'typeorm';
+import { DataSource, EntityManager, QueryRunner, Repository } from 'typeorm';
 import { Tenant, TenantStatus } from '../database/entities/tenant.entity';
 import {
   UserRole,
@@ -15,13 +15,29 @@ type UserTenantRoleRepositoryMock = Pick<
   Repository<UserTenantRole>,
   'create' | 'findOne' | 'save'
 >;
-type QueryRunnerMock = Pick<QueryRunner, 'connect' | 'query' | 'release'>;
+type QueryRunnerMock = Pick<
+  QueryRunner,
+  | 'commitTransaction'
+  | 'connect'
+  | 'query'
+  | 'release'
+  | 'rollbackTransaction'
+  | 'startTransaction'
+> & {
+  manager: Pick<EntityManager, 'save'>;
+};
 
 function createQueryRunnerMock(): jest.Mocked<QueryRunnerMock> {
   return {
+    commitTransaction: jest.fn().mockResolvedValue(undefined),
     connect: jest.fn().mockResolvedValue(undefined),
     query: jest.fn().mockResolvedValue(undefined),
     release: jest.fn().mockResolvedValue(undefined),
+    rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+    startTransaction: jest.fn().mockResolvedValue(undefined),
+    manager: {
+      save: jest.fn(),
+    },
   };
 }
 
@@ -117,9 +133,10 @@ describe('TenantsService tenant access', () => {
     } as UserTenantRole;
 
     tenantRepository.create.mockReturnValue(tenant);
-    tenantRepository.save.mockResolvedValue(tenant);
     userTenantRoleRepository.create.mockReturnValue(userTenantRole);
-    userTenantRoleRepository.save.mockResolvedValue(userTenantRole);
+    queryRunner.manager.save
+      .mockResolvedValueOnce(tenant)
+      .mockResolvedValueOnce(userTenantRole);
     service = new TenantsService(
       tenantRepository as unknown as Repository<Tenant>,
       userTenantRoleRepository as unknown as Repository<UserTenantRole>,
@@ -129,6 +146,11 @@ describe('TenantsService tenant access', () => {
     );
 
     await service.createTenant('owner-1', { shopName: 'Demo Shop' });
+
+    expect(queryRunner.startTransaction).toHaveBeenCalledTimes(1);
+    expect(queryRunner.commitTransaction).toHaveBeenCalledTimes(1);
+    expect(queryRunner.rollbackTransaction).not.toHaveBeenCalled();
+    expect(queryRunner.release).toHaveBeenCalledTimes(1);
 
     const inventoryTableSql = queryRunner.query.mock.calls
       .map(([sql]) => sql)
@@ -143,5 +165,35 @@ describe('TenantsService tenant access', () => {
     expect(inventoryTableSql).toContain(
       'CONSTRAINT uq_inventory_sku_warehouse UNIQUE (master_sku_id, warehouse_id)',
     );
+  });
+
+  it('rolls back provisioning when the tenant schema cannot be created', async () => {
+    const queryRunner = createQueryRunnerMock();
+    const tenant = createTenant();
+    const userTenantRole = {
+      id: 'role-1',
+      userId: 'owner-1',
+      tenantId: tenant.id,
+      role: UserRole.OWNER,
+    } as UserTenantRole;
+
+    tenantRepository.create.mockReturnValue(tenant);
+    userTenantRoleRepository.create.mockReturnValue(userTenantRole);
+    queryRunner.manager.save.mockResolvedValueOnce(tenant);
+    queryRunner.query.mockRejectedValueOnce(new Error('schema unavailable'));
+    service = new TenantsService(
+      tenantRepository as unknown as Repository<Tenant>,
+      userTenantRoleRepository as unknown as Repository<UserTenantRole>,
+      {
+        createQueryRunner: jest.fn().mockReturnValue(queryRunner),
+      } as unknown as DataSource,
+    );
+
+    await expect(
+      service.createTenant('owner-1', { shopName: 'Demo Shop' }),
+    ).rejects.toThrow('schema unavailable');
+    expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
+    expect(queryRunner.rollbackTransaction).toHaveBeenCalledTimes(1);
+    expect(queryRunner.release).toHaveBeenCalledTimes(1);
   });
 });
