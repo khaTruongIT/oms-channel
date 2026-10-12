@@ -7,6 +7,7 @@ import { JobsController } from './jobs.controller';
 import { StockSyncProcessor } from './processors/stock-sync.processor';
 import { BatchSyncProcessor } from './processors/batch-sync.processor';
 import { StockSyncScheduler } from './stock-sync.scheduler';
+import { OutboxPublisherProcessor } from './processors/outbox-publisher.processor';
 import { IntegrationsModule } from '../integrations/integrations.module';
 import { ChannelMappingsModule } from '../channel-mappings/channel-mappings.module';
 
@@ -40,7 +41,8 @@ import { ChannelMappingsModule } from '../channel-mappings/channel-mappings.modu
     StockSyncProcessor,
     BatchSyncProcessor,
     StockSyncScheduler,
+    OutboxPublisherProcessor,
   ],
-  exports: [JobsService],
+  exports: [JobsService, OutboxPublisherProcessor],
 })
 export class JobsModule {}

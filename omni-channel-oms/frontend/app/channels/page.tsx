@@ -154,7 +154,13 @@ export default function ChannelsPage() {
     setReconcilingAccountId(accountId);
     try {
       const run = await triggerReconciliationRun(accountId);
-      toast.success(`Reconciliation recorded as ${run.status}`);
+      if (run.status === "BLOCKED_CONTRACT") {
+        toast.info(
+          "Đối soát kênh: Tạm hoãn tự động (Chờ cấu hình Shopee Partner contract chính thức).",
+        );
+      } else {
+        toast.success(`Reconciliation completed: ${run.status}`);
+      }
       await mutateHealth();
     } catch (error: unknown) {
       toast.error(getApiErrorMessage(error, "Unable to trigger reconciliation."));

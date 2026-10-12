@@ -60,6 +60,13 @@ export async function resolveIntegrationException(id: string): Promise<void> {
   await api.post(`/integration-exceptions/${id}/resolve`);
 }
 
+export async function mapSkuAndRetryIntegrationException(
+  id: string,
+  masterSkuId: string,
+): Promise<void> {
+  await api.post(`/integration-exceptions/${id}/map-sku`, { masterSkuId });
+}
+
 export async function triggerReconciliationRun(
   channelAccountId?: string,
 ): Promise<ReconciliationRun> {

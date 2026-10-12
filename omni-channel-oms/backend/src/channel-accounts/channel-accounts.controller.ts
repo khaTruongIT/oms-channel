@@ -5,6 +5,7 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
   Request,
   UseGuards,
@@ -44,7 +45,7 @@ export class ChannelAccountsController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async reconnect(
     @Request() request: { user: { tenantId?: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.channelAccountsService.requestReconnect(
       id,
@@ -56,7 +57,7 @@ export class ChannelAccountsController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async disconnect(
     @Request() request: { user: { tenantId?: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.channelAccountsService.disconnect(
       id,

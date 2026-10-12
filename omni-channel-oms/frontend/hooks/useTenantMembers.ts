@@ -17,14 +17,20 @@ export interface TenantMember {
   joinedAt: string;
 }
 
+export type InviteEmailStatus = "PENDING" | "SENT" | "EMAIL_FAILED";
+
 export interface TenantInvite {
   id: string;
   email: string;
   role: UserRole;
-  token: string;
+  token?: string;
   expiresAt: string;
   invitedBy: string;
   createdAt: string;
+  emailStatus?: InviteEmailStatus;
+  emailSentAt?: string | null;
+  emailError?: string | null;
+  inviteLink?: string;
 }
 
 export function useTenantMembers(tenantId: string | null) {
@@ -75,6 +81,23 @@ export async function inviteMember(
 
 export async function cancelInvite(tenantId: string, inviteId: string) {
   const { data } = await api.delete(`/tenants/${tenantId}/invites/${inviteId}`);
+  return data;
+}
+
+export async function resendInvite(tenantId: string, inviteId: string) {
+  const { data } = await api.post(
+    `/tenants/${tenantId}/invites/${inviteId}/resend`,
+  );
+  return data as {
+    success: boolean;
+    inviteLink: string;
+    emailStatus: InviteEmailStatus;
+    emailError?: string;
+  };
+}
+
+export async function acceptInvite(token: string) {
+  const { data } = await api.post("/invites/accept", { token });
   return data;
 }
 

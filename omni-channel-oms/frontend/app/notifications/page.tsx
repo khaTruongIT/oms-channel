@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import FeatureGate from "@/components/layout/FeatureGate";
 import { useNotifications, Notification } from "@/hooks/useNotifications";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -64,7 +65,8 @@ export default function NotificationsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <FeatureGate feature="notifications">
+        <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -184,6 +186,7 @@ export default function NotificationsPage() {
           )}
         </div>
       </div>
+      </FeatureGate>
     </DashboardLayout>
   );
 }

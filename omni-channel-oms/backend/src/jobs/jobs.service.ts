@@ -2,6 +2,9 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
+  BeforeApplicationShutdown,
+  Logger,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
@@ -23,11 +26,33 @@ export interface JobStatusResponse {
 }
 
 @Injectable()
-export class JobsService {
+export class JobsService implements OnModuleInit, BeforeApplicationShutdown {
+  private readonly logger = new Logger(JobsService.name);
+
   constructor(
     @InjectQueue('stock-sync') private stockSyncQueue: Queue,
     @InjectQueue('batch-sync') private batchSyncQueue: Queue,
   ) {}
+
+  onModuleInit() {
+    this.stockSyncQueue?.on('error', (err) => {
+      this.logger.warn(`stock-sync queue error: ${err.message}`);
+    });
+    this.batchSyncQueue?.on('error', (err) => {
+      this.logger.warn(`batch-sync queue error: ${err.message}`);
+    });
+  }
+
+  async beforeApplicationShutdown() {
+    try {
+      await Promise.allSettled([
+        this.stockSyncQueue?.close(),
+        this.batchSyncQueue?.close(),
+      ]);
+    } catch {
+      // ignore
+    }
+  }
 
   async queueStockSync(
     masterSkuId: string,

@@ -8,6 +8,7 @@ import {
   UseGuards,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
@@ -62,7 +63,7 @@ export class WebhooksController {
    */
   @Post('shopee/:callbackId')
   async handleShopeeCallback(
-    @Param('callbackId') callbackId: string,
+    @Param('callbackId', ParseUUIDPipe) callbackId: string,
     @Req() request: ExpressRequest & { rawBody?: Buffer },
     @Headers() headers: Record<string, string | string[] | undefined>,
   ) {

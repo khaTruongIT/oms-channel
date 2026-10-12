@@ -17,6 +17,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import FeatureGate from "@/components/layout/FeatureGate";
 
 type ImportType = "products" | "customers" | "inventory";
 
@@ -59,14 +60,7 @@ export default function BulkOperationsPage() {
 
   const handleImport = async () => {
     if (!csvData) return;
-
-    try {
-      // TODO: Implement actual import API call
-      toast.success(`Importing ${csvData.rows.length} ${importType}...`);
-      setStep("complete");
-    } catch {
-      toast.error("Import failed");
-    }
+    toast.info("Tính năng nhập hàng loạt đang được chuẩn bị cho Sprint 3");
   };
 
   const downloadTemplate = () => {
@@ -82,7 +76,8 @@ export default function BulkOperationsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <FeatureGate feature="bulkOperations">
+        <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -228,7 +223,8 @@ export default function BulkOperationsPage() {
             </Button>
           </div>
         )}
-      </div>
+        </div>
+      </FeatureGate>
     </DashboardLayout>
   );
 }

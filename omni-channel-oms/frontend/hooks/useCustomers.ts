@@ -1,11 +1,12 @@
 /**
+ * @deprecated Gated until Sprint 4 (Customer management derived from orders).
  * useCustomers Hook
- * Customer data management with SWR
  */
 
 "use client";
 
 import useSWR from "swr";
+import { isFeatureEnabled } from "@/lib/features";
 
 export interface Customer {
   id: string;
@@ -20,72 +21,50 @@ export interface Customer {
   updatedAt: string;
 }
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const emptyCustomers: Customer[] = [];
 
+/**
+ * @deprecated Gated by NEXT_PUBLIC_FEATURE_CUSTOMERS until Sprint 4
+ */
 export function useCustomers() {
+  const isEnabled = isFeatureEnabled("customers");
   const { data, error, isLoading, mutate } = useSWR<Customer[]>(
-    "/api/customers",
-    fetcher,
+    isEnabled ? "/api/customers" : null,
   );
 
   return {
-    customers: data,
-    isLoading,
-    isError: error,
+    customers: isEnabled ? (data || emptyCustomers) : emptyCustomers,
+    isLoading: isEnabled ? isLoading : false,
+    isError: isEnabled ? error : null,
     mutate,
   };
 }
 
+/**
+ * @deprecated Gated by NEXT_PUBLIC_FEATURE_CUSTOMERS until Sprint 4
+ */
 export function useCustomer(id: string) {
+  const isEnabled = isFeatureEnabled("customers");
   const { data, error, isLoading, mutate } = useSWR<Customer>(
-    id ? `/api/customers/${id}` : null,
-    fetcher,
+    isEnabled && id ? `/api/customers/${id}` : null,
   );
 
   return {
-    customer: data,
-    isLoading,
-    isError: error,
+    customer: isEnabled ? data : undefined,
+    isLoading: isEnabled ? isLoading : false,
+    isError: isEnabled ? error : null,
     mutate,
   };
 }
 
-export async function createCustomer(data: Partial<Customer>) {
-  const response = await fetch("/api/customers", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to create customer");
-  }
-
-  return response.json();
+export async function createCustomer(_data: Partial<Customer>) {
+  throw new Error("Customer creation is under development");
 }
 
-export async function updateCustomer(id: string, data: Partial<Customer>) {
-  const response = await fetch(`/api/customers/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to update customer");
-  }
-
-  return response.json();
+export async function updateCustomer(_id: string, _data: Partial<Customer>) {
+  throw new Error("Customer updates are under development");
 }
 
-export async function deleteCustomer(id: string) {
-  const response = await fetch(`/api/customers/${id}`, {
-    method: "DELETE",
-  });
-
-  if (!response.ok) {
-    throw new Error("Failed to delete customer");
-  }
-
-  return response.json();
+export async function deleteCustomer(_id: string) {
+  throw new Error("Customer deletion is under development");
 }

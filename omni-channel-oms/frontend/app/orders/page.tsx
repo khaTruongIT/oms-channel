@@ -1,19 +1,34 @@
 /**
- * Orders Page - Enhanced with Phase 1 Components
- * Integrated: Pagination, EmptyState, Skeleton, ExportButton, BulkActions
+ * Orders Page - Enhanced with Phase 1 & Sprint 2 Components
+ * Integrated: Server-side Pagination, URL sync, EmptyState, Skeleton, ExportButton,
+ * Bulk Status Transitions with Idempotency & Partial Error handling, Bulk Packing Slip Printing
  */
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Table, { Column } from "@/components/ui/Table";
 import { OrderStatusBadge } from "@/components/ui/Badge";
 import Button from "@/components/ui/Button";
 import CreateOrderModal from "@/components/orders/CreateOrderModal";
-import { useOrders, Order } from "@/hooks/useOrders";
-import { Plus, Eye, Trash2, Printer } from "lucide-react";
+import CancelOrderModal from "@/components/orders/CancelOrderModal";
+import {
+  Order,
+  bulkUpdateOrderStatus,
+} from "@/hooks/useOrders";
+import {
+  Plus,
+  Eye,
+  Printer,
+  Search,
+  CheckCircle2,
+  Clock,
+  Truck,
+  XCircle,
+  RotateCcw,
+} from "lucide-react";
 import { format } from "date-fns";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -23,71 +38,128 @@ import { useBulkSelection } from "@/hooks/useBulkSelection";
 import BulkActionBar from "@/components/ui/BulkActionBar";
 import { toast } from "sonner";
 import { useChannelAccounts } from "@/hooks/useChannelAccounts";
-import type { OrderFilters, OrderStatus } from "@/types/orders";
+import { usePaginatedQuery } from "@/hooks/usePaginatedQuery";
+import { getApiErrorMessage } from "@/lib/api-error";
+import type { OrderStatus } from "@/types/orders";
+
+interface OrdersFiltersState {
+  status: OrderStatus | "ALL";
+  channel: string;
+  externalOrderId: string;
+  channelAccountId: string;
+  q: string;
+}
 
 export default function OrdersPage() {
   const router = useRouter();
-  const [filters, setFilters] = useState<OrderFilters>({
-    status: "ALL",
-    channel: "",
-    externalOrderId: "",
-    channelAccountId: "",
-  });
-  const { orders, isLoading, mutate } = useOrders(filters);
   const { accounts } = useChannelAccounts();
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isBulkCancelModalOpen, setIsBulkCancelModalOpen] = useState(false);
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
-  const filteredOrders = useMemo(
-    () =>
-      orders.filter((order) => {
-        const matchesStatus =
-          !filters.status || filters.status === "ALL" || order.status === filters.status;
-        const matchesExternalId =
-          !filters.externalOrderId ||
-          order.externalOrderId
-            .toLowerCase()
-            .includes(filters.externalOrderId.toLowerCase());
-        const matchesAccount =
-          !filters.channelAccountId || order.channelAccountId === filters.channelAccountId;
-
-        return matchesStatus && matchesExternalId && matchesAccount;
-      }),
-    [filters.channelAccountId, filters.externalOrderId, filters.status, orders],
-  );
-
-  // Pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
-
-  // Bulk selection
+  // Server-side pagination & filter sync
   const {
+    items: orders,
+    total,
+    totalPages,
+    page,
+    limit,
+    filters,
+    setPage,
+    setFilters,
+    resetFilters,
+    isLoading,
+    mutate,
+  } = usePaginatedQuery<Order, OrdersFiltersState>({
+    endpoint: "/orders",
+    defaultPage: 1,
+    defaultLimit: 10,
+    defaultFilters: {
+      status: "ALL",
+      channel: "",
+      externalOrderId: "",
+      channelAccountId: "",
+      q: "",
+    },
+    syncWithUrl: true,
+  });
+
+  // Bulk selection on current page items
+  const {
+    selectedIds,
     selectedCount,
     isSelected,
     isAllSelected,
     toggleItem,
     toggleAll,
     clearSelection,
-  } = useBulkSelection(filteredOrders);
+  } = useBulkSelection(orders);
 
   const handleRowClick = (order: Order): void => {
     router.push(`/orders/${order.id}`);
   };
 
-  const handleBulkDelete = async (): Promise<void> => {
-    toast.info("Bulk delete is disabled until the order delete API is available.");
+  // Bulk Status Transition Handler with Partial Failures & Idempotency
+  const handleBulkStatusChange = async (targetStatus: OrderStatus, reason?: string) => {
+    if (selectedIds.length === 0) return;
+
+    setIsBulkProcessing(true);
+    const idempotencyKey = `bulk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    try {
+      const res = await bulkUpdateOrderStatus({
+        orderIds: selectedIds,
+        status: targetStatus,
+        reason,
+        idempotencyKey,
+      });
+
+      if (res.failureCount === 0) {
+        toast.success(
+          `Successfully updated ${res.successCount} order${res.successCount > 1 ? "s" : ""} to ${targetStatus}`,
+        );
+      } else if (res.successCount > 0) {
+        const errorSummary = res.failed
+          .slice(0, 3)
+          .map((f) => `${f.id.slice(0, 8)}: ${f.message}`)
+          .join("; ");
+        toast.warning(
+          `Updated ${res.successCount} orders. ${res.failureCount} failed: ${errorSummary}`,
+        );
+      } else {
+        const errorSummary = res.failed
+          .slice(0, 3)
+          .map((f) => f.message)
+          .join("; ");
+        toast.error(
+          `Failed to update orders: ${errorSummary || "Invalid status transition"}`,
+        );
+      }
+
+      clearSelection();
+      await mutate();
+    } catch (error: unknown) {
+      const msg = getApiErrorMessage(error, "Bulk status update failed");
+      toast.error(`State conflict: ${msg}. Refreshing latest order statuses.`);
+      await mutate();
+    } finally {
+      setIsBulkProcessing(false);
+    }
   };
 
+  // Bulk Packing Slip Print (Max 50 Orders)
   const handleBulkPrint = (): void => {
-    // TODO: Implement bulk print
-    toast.info("Bulk print feature coming soon");
-  };
+    if (selectedIds.length === 0) return;
 
-  // Pagination logic
-  const totalItems = filteredOrders.length;
-  const totalPages = Math.ceil(totalItems / pageSize);
-  const startIndex = (currentPage - 1) * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedOrders = filteredOrders.slice(startIndex, endIndex);
+    if (selectedIds.length > 50) {
+      toast.error(
+        `Cannot print more than 50 packing slips at once. You selected ${selectedIds.length}. Please reduce your selection.`,
+      );
+      return;
+    }
+
+    router.push(`/orders/bulk-print?ids=${selectedIds.join(",")}`);
+  };
 
   const columns: Column<Order>[] = [
     {
@@ -180,10 +252,10 @@ export default function OrdersPage() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              router.push(`/orders/${order.id}/print?type=invoice`);
+              router.push(`/orders/${order.id}/print?type=packing-slip`);
             }}
             className="p-1 hover:bg-gray-100 rounded transition-colors"
-            title="Print invoice"
+            title="Print packing slip"
           >
             <Printer className="w-4 h-4 text-gray-600" />
           </button>
@@ -193,16 +265,23 @@ export default function OrdersPage() {
   ];
 
   // Prepare export data
-  const exportData =
-    filteredOrders.map((order) => ({
-      "Order Number": order.orderNumber,
-      Channel: order.channel,
-      Customer: order.customerName ?? "",
-      Status: order.status,
-      Items: order.items?.length || 0,
-      "External ID": order.externalOrderId,
-      Created: format(new Date(order.createdAt), "yyyy-MM-dd"),
-    }));
+  const exportData = orders.map((order) => ({
+    "Order Number": order.orderNumber,
+    Channel: order.channel,
+    Customer: order.customerName ?? "",
+    Status: order.status,
+    Items: order.items?.length || 0,
+    "External ID": order.externalOrderId,
+    Created: format(new Date(order.createdAt), "yyyy-MM-dd"),
+  }));
+
+  const hasActiveFilters = Boolean(
+    (filters.status && filters.status !== "ALL") ||
+      filters.channel ||
+      filters.externalOrderId ||
+      filters.channelAccountId ||
+      filters.q,
+  );
 
   return (
     <DashboardLayout>
@@ -211,7 +290,9 @@ export default function OrdersPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-heading">Orders</h1>
-            <p className="text-body mt-1">Manage and track all your orders</p>
+            <p className="text-body mt-1">
+              Manage and track all multi-channel orders ({total} total)
+            </p>
           </div>
           <div className="flex items-center gap-3">
             <ExportButton
@@ -229,7 +310,23 @@ export default function OrdersPage() {
           </div>
         </div>
 
-        <div className="grid gap-3 rounded-xl border border-border bg-white p-4 md:grid-cols-4">
+        {/* Filter Bar with URL synchronization */}
+        <div className="grid gap-3 rounded-xl border border-border bg-white p-4 sm:grid-cols-2 md:grid-cols-5">
+          <label className="flex flex-col gap-1 text-sm font-medium text-heading sm:col-span-2 md:col-span-1">
+            Search
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-placeholder" />
+              <input
+                value={filters.q ?? ""}
+                onChange={(event) =>
+                  setFilters((current) => ({ ...current, q: event.target.value }))
+                }
+                placeholder="Order #, customer, ID..."
+                className="w-full rounded-lg border border-border bg-white pl-9 pr-3 py-2 text-sm font-normal focus:border-primary focus:outline-none"
+              />
+            </div>
+          </label>
+
           <label className="flex flex-col gap-1 text-sm font-medium text-heading">
             Channel
             <select
@@ -246,6 +343,7 @@ export default function OrdersPage() {
               <option value="manual">Manual</option>
             </select>
           </label>
+
           <label className="flex flex-col gap-1 text-sm font-medium text-heading">
             Status
             <select
@@ -267,6 +365,7 @@ export default function OrdersPage() {
               <option value="CANCELLED">Cancelled</option>
             </select>
           </label>
+
           <label className="flex flex-col gap-1 text-sm font-medium text-heading">
             Account
             <select
@@ -287,20 +386,33 @@ export default function OrdersPage() {
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm font-medium text-heading">
-            External ID
-            <input
-              value={filters.externalOrderId ?? ""}
-              onChange={(event) =>
-                setFilters((current) => ({
-                  ...current,
-                  externalOrderId: event.target.value,
-                }))
-              }
-              placeholder="Search channel order"
-              className="rounded-lg border border-border bg-white px-3 py-2 text-sm font-normal focus:border-primary focus:outline-none"
-            />
-          </label>
+
+          <div className="flex items-end gap-2">
+            <label className="flex flex-col gap-1 text-sm font-medium text-heading flex-1">
+              External ID
+              <input
+                value={filters.externalOrderId ?? ""}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    externalOrderId: event.target.value,
+                  }))
+                }
+                placeholder="External order ID"
+                className="w-full rounded-lg border border-border bg-white px-3 py-2 text-sm font-normal focus:border-primary focus:outline-none"
+              />
+            </label>
+            {hasActiveFilters && (
+              <Button
+                variant="secondary"
+                onClick={resetFilters}
+                className="mb-0.5 px-3"
+                title="Reset all filters"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Table */}
@@ -309,59 +421,97 @@ export default function OrdersPage() {
             <div className="p-6">
               <TableSkeleton rows={10} />
             </div>
-          ) : filteredOrders.length === 0 ? (
+          ) : orders.length === 0 ? (
             <EmptyState
               icon={<Plus className="w-12 h-12" />}
-              title="No orders yet"
-              description="Get started by creating your first order"
+              title={hasActiveFilters ? "No matching orders" : "No orders yet"}
+              description={
+                hasActiveFilters
+                  ? "Try adjusting your filter criteria to find what you're looking for."
+                  : "Get started by creating your first multi-channel order"
+              }
               action={
-                <Button
-                  variant="primary"
-                  onClick={() => setIsCreateModalOpen(true)}
-                >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Order
-                </Button>
+                hasActiveFilters ? (
+                  <Button variant="secondary" onClick={resetFilters}>
+                    Clear Filters
+                  </Button>
+                ) : (
+                  <Button
+                    variant="primary"
+                    onClick={() => setIsCreateModalOpen(true)}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Order
+                  </Button>
+                )
               }
             />
           ) : (
             <>
               <Table
                 columns={columns}
-                data={paginatedOrders}
+                data={orders}
                 onRowClick={handleRowClick}
                 getRowId={(order) => order.id}
               />
               <Pagination
-                currentPage={currentPage}
+                currentPage={page}
                 totalPages={totalPages}
-                pageSize={pageSize}
-                totalItems={totalItems}
-                onPageChange={setCurrentPage}
+                pageSize={limit}
+                totalItems={total}
+                onPageChange={setPage}
               />
             </>
           )}
         </div>
       </div>
 
-      {/* Bulk Action Bar */}
+      {/* Bulk Action Bar with Status Transitions & Printing */}
       <BulkActionBar
         selectedCount={selectedCount}
         onClear={clearSelection}
+        isLoading={isBulkProcessing}
         actions={[
           {
-            label: "Delete",
-            icon: <Trash2 className="w-4 h-4 mr-2" />,
-            onClick: handleBulkDelete,
+            label: "Confirm",
+            icon: <CheckCircle2 className="w-4 h-4 mr-1.5" />,
+            onClick: () => void handleBulkStatusChange("CONFIRMED"),
+            variant: "primary",
+          },
+          {
+            label: "Process",
+            icon: <Clock className="w-4 h-4 mr-1.5" />,
+            onClick: () => void handleBulkStatusChange("PROCESSING"),
+            variant: "secondary",
+          },
+          {
+            label: "Ship",
+            icon: <Truck className="w-4 h-4 mr-1.5" />,
+            onClick: () => void handleBulkStatusChange("SHIPPED"),
+            variant: "secondary",
+          },
+          {
+            label: "Cancel",
+            icon: <XCircle className="w-4 h-4 mr-1.5" />,
+            onClick: () => setIsBulkCancelModalOpen(true),
             variant: "danger",
           },
           {
-            label: "Print",
-            icon: <Printer className="w-4 h-4 mr-2" />,
+            label: "Print Slips",
+            icon: <Printer className="w-4 h-4 mr-1.5" />,
             onClick: handleBulkPrint,
             variant: "secondary",
           },
         ]}
+      />
+
+      {/* Bulk Cancel Modal */}
+      <CancelOrderModal
+        isOpen={isBulkCancelModalOpen}
+        onClose={() => setIsBulkCancelModalOpen(false)}
+        onConfirm={(reason) => handleBulkStatusChange("CANCELLED", reason)}
+        orderNumber={`${selectedCount} selected orders`}
+        isSubmitting={isBulkProcessing}
       />
 
       {/* Create Modal */}

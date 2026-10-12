@@ -21,6 +21,9 @@ export const dataSourceOptions: DataSourceOptions = {
   migrationsTransactionMode: 'each',
   logging: isDevOrLocal,
   schema: 'public',
+  extra: {
+    statement_timeout: parseInt(process.env.DB_STATEMENT_TIMEOUT || '5000', 10),
+  },
 };
 
 const dataSource = new DataSource(dataSourceOptions);

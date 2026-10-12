@@ -20,6 +20,7 @@ import ExportButton from "@/components/ui/ExportButton";
 import { useBulkSelection } from "@/hooks/useBulkSelection";
 import BulkActionBar from "@/components/ui/BulkActionBar";
 import { toast } from "sonner";
+import FeatureGate from "@/components/layout/FeatureGate";
 
 export default function CustomersPage() {
   const router = useRouter();
@@ -68,16 +69,7 @@ export default function CustomersPage() {
   };
 
   const handleBulkDelete = async () => {
-    if (confirm(`Delete ${selectedCount} customer(s)?`)) {
-      try {
-        // TODO: Implement bulk delete API
-        toast.success(`${selectedCount} customer(s) deleted`);
-        clearSelection();
-        mutate();
-      } catch (error) {
-        toast.error("Failed to delete customers");
-      }
-    }
+    toast.info("Tính năng khách hàng đang được chuẩn bị cho Sprint 4");
   };
 
   const columns = [
@@ -213,7 +205,8 @@ export default function CustomersPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <FeatureGate feature="customers">
+        <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -298,19 +291,20 @@ export default function CustomersPage() {
         </div>
       </div>
 
-      {/* Bulk Action Bar */}
-      <BulkActionBar
-        selectedCount={selectedCount}
-        onClear={clearSelection}
-        actions={[
-          {
-            label: "Delete",
-            icon: <Trash2 className="w-4 h-4 mr-2" />,
-            onClick: handleBulkDelete,
-            variant: "danger",
-          },
-        ]}
-      />
+        {/* Bulk Action Bar */}
+        <BulkActionBar
+          selectedCount={selectedCount}
+          onClear={clearSelection}
+          actions={[
+            {
+              label: "Delete",
+              icon: <Trash2 className="w-4 h-4 mr-2" />,
+              onClick: handleBulkDelete,
+              variant: "danger",
+            },
+          ]}
+        />
+      </FeatureGate>
     </DashboardLayout>
   );
 }

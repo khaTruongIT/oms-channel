@@ -1,27 +1,44 @@
 /**
  * Orders Redux Slice
- * Manages orders state
+ * Manages orders state with pagination support (S2.1.10)
  */
 
 import { createSlice, createAsyncThunk, PayloadAction } from "@reduxjs/toolkit";
 import { ordersService } from "@services";
 import { Order, OrderFilterParams, OrderStatus, ApiError } from "@types";
-import type { UpdateOrderStatusDto } from "@services/orders.service";
+import type {
+  UpdateOrderStatusDto,
+  OrdersPaginationMeta,
+  PaginatedOrdersResult,
+} from "@services/orders.service";
 
-interface OrdersState {
+export interface OrdersState {
   orders: Order[];
   selectedOrder: Order | null;
   filters: OrderFilterParams;
+  meta: OrdersPaginationMeta;
   isLoading: boolean;
+  isLoadingMore: boolean;
   isRefreshing: boolean;
   error: string | null;
 }
 
+const initialMeta: OrdersPaginationMeta = {
+  page: 1,
+  limit: 20,
+  total: 0,
+  totalPages: 1,
+  hasNextPage: false,
+  hasPrevPage: false,
+};
+
 const initialState: OrdersState = {
   orders: [],
   selectedOrder: null,
-  filters: {},
+  filters: { page: 1, limit: 20 },
+  meta: initialMeta,
   isLoading: false,
+  isLoadingMore: false,
   isRefreshing: false,
   error: null,
 };
@@ -31,8 +48,29 @@ export const fetchOrders = createAsyncThunk(
   "orders/fetchOrders",
   async (params: OrderFilterParams | undefined, { rejectWithValue }) => {
     try {
-      const orders = await ordersService.getOrders(params);
-      return orders;
+      const result = await ordersService.getOrders(params);
+      return result;
+    } catch (error) {
+      return rejectWithValue((error as ApiError).message);
+    }
+  },
+);
+
+export const fetchMoreOrders = createAsyncThunk(
+  "orders/fetchMoreOrders",
+  async (_, { getState, rejectWithValue }) => {
+    try {
+      const state = (getState() as { orders: OrdersState }).orders;
+      if (!state.meta.hasNextPage || state.isLoadingMore || state.isLoading) {
+        return null;
+      }
+      const nextPage = state.meta.page + 1;
+      const result = await ordersService.getOrders({
+        ...state.filters,
+        page: nextPage,
+        limit: state.meta.limit,
+      });
+      return result;
     } catch (error) {
       return rejectWithValue((error as ApiError).message);
     }
@@ -70,8 +108,11 @@ export const refreshOrders = createAsyncThunk(
   "orders/refreshOrders",
   async (params: OrderFilterParams | undefined, { rejectWithValue }) => {
     try {
-      const orders = await ordersService.getOrders(params);
-      return orders;
+      const result = await ordersService.getOrders({
+        ...params,
+        page: 1,
+      });
+      return result;
     } catch (error) {
       return rejectWithValue((error as ApiError).message);
     }
@@ -102,10 +143,30 @@ const ordersSlice = createSlice({
       })
       .addCase(fetchOrders.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.orders = action.payload;
+        state.orders = action.payload.orders;
+        state.meta = action.payload.meta;
+        state.filters.page = action.payload.meta.page;
       })
       .addCase(fetchOrders.rejected, (state, action) => {
         state.isLoading = false;
+        state.error = action.payload as string;
+      });
+
+    // Fetch more orders (Pagination load more)
+    builder
+      .addCase(fetchMoreOrders.pending, (state) => {
+        state.isLoadingMore = true;
+      })
+      .addCase(fetchMoreOrders.fulfilled, (state, action) => {
+        state.isLoadingMore = false;
+        if (action.payload) {
+          state.orders = [...state.orders, ...action.payload.orders];
+          state.meta = action.payload.meta;
+          state.filters.page = action.payload.meta.page;
+        }
+      })
+      .addCase(fetchMoreOrders.rejected, (state, action) => {
+        state.isLoadingMore = false;
         state.error = action.payload as string;
       });
 
@@ -132,12 +193,10 @@ const ordersSlice = createSlice({
       })
       .addCase(updateOrderStatus.fulfilled, (state, action) => {
         state.isLoading = false;
-        // Update order in list
         const index = state.orders.findIndex((o) => o.id === action.payload.id);
         if (index !== -1) {
           state.orders[index] = action.payload;
         }
-        // Update selected order if it's the same
         if (state.selectedOrder?.id === action.payload.id) {
           state.selectedOrder = action.payload;
         }
@@ -155,7 +214,9 @@ const ordersSlice = createSlice({
       })
       .addCase(refreshOrders.fulfilled, (state, action) => {
         state.isRefreshing = false;
-        state.orders = action.payload;
+        state.orders = action.payload.orders;
+        state.meta = action.payload.meta;
+        state.filters.page = action.payload.meta.page;
       })
       .addCase(refreshOrders.rejected, (state, action) => {
         state.isRefreshing = false;

@@ -7,6 +7,9 @@ import { buildCorsOptions, isSwaggerEnabled } from './config/security.config';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
+  // Enable shutdown hooks for graceful termination
+  app.enableShutdownHooks();
+
   // Enable validation globally
   app.useGlobalPipes(
     new ValidationPipe({

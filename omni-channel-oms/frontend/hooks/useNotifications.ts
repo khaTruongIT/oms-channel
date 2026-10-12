@@ -1,12 +1,12 @@
 /**
+ * @deprecated Gated until Sprint 4 (30s polling over /notifications).
  * useNotifications Hook
- * Notification management with real-time updates
  */
 
 "use client";
 
-import { useState, useEffect } from "react";
 import useSWR from "swr";
+import { isFeatureEnabled } from "@/lib/features";
 
 export interface Notification {
   id: string;
@@ -18,48 +18,33 @@ export interface Notification {
   link?: string;
 }
 
-const fetcher = (url: string) => fetch(url).then((res) => res.json());
+const emptyNotifications: Notification[] = [];
 
+/**
+ * @deprecated Gated by NEXT_PUBLIC_FEATURE_NOTIFICATIONS until Sprint 4
+ */
 export function useNotifications() {
+  const isEnabled = isFeatureEnabled("notifications");
   const { data, error, isLoading, mutate } = useSWR<Notification[]>(
-    "/api/notifications",
-    fetcher,
+    isEnabled ? "/api/notifications" : null,
     {
-      refreshInterval: 30000, // Refresh every 30 seconds
+      refreshInterval: 30000,
     },
   );
 
-  const unreadCount = data?.filter((n) => !n.read).length || 0;
+  const notifications = isEnabled ? (data || emptyNotifications) : emptyNotifications;
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
-  const markAsRead = async (id: string) => {
-    try {
-      await fetch(`/api/notifications/${id}/read`, {
-        method: "PUT",
-      });
-      mutate();
-    } catch (error) {
-      console.error("Failed to mark notification as read:", error);
-    }
-  };
-
-  const markAllAsRead = async () => {
-    try {
-      await fetch("/api/notifications/read-all", {
-        method: "PUT",
-      });
-      mutate();
-    } catch (error) {
-      console.error("Failed to mark all as read:", error);
-    }
-  };
+  const markAsRead = async (_id: string) => {};
+  const markAllAsRead = async () => {};
 
   return {
-    notifications: data || [],
+    notifications,
     unreadCount,
-    isLoading,
-    isError: error,
+    isLoading: isEnabled ? isLoading : false,
+    isError: isEnabled ? error : null,
+    mutate,
     markAsRead,
     markAllAsRead,
-    mutate,
   };
 }

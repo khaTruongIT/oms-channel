@@ -1,27 +1,34 @@
 /**
  * Orders List Screen
- * Display all orders with filters
+ * Display all orders with filters and infinite scroll pagination (S2.1.10)
  */
 
 import React, { useEffect, useState } from "react";
-import { View, Text, FlatList, StyleSheet, RefreshControl } from "react-native";
+import {
+  View,
+  Text,
+  FlatList,
+  StyleSheet,
+  RefreshControl,
+  ActivityIndicator,
+} from "react-native";
 import { useAppDispatch, useAppSelector } from "@store/hooks";
 import {
   fetchOrders,
+  fetchMoreOrders,
   refreshOrders,
   setFilters,
 } from "@store/slices/ordersSlice";
 import { Card, EmptyState, Badge, Input } from "@components";
 import { theme } from "@theme";
-import { Order, Channel, OrderStatus } from "@types";
+import { Order } from "@types";
 
 export const OrdersListScreen: React.FC<{ navigation: any }> = ({
   navigation,
 }) => {
   const dispatch = useAppDispatch();
-  const { orders, isLoading, isRefreshing, filters } = useAppSelector(
-    (state) => state.orders,
-  );
+  const { orders, isLoading, isLoadingMore, isRefreshing, filters, meta } =
+    useAppSelector((state) => state.orders);
 
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -31,6 +38,12 @@ export const OrdersListScreen: React.FC<{ navigation: any }> = ({
 
   const handleRefresh = () => {
     dispatch(refreshOrders(filters));
+  };
+
+  const handleLoadMore = () => {
+    if (meta?.hasNextPage && !isLoadingMore && !isLoading) {
+      dispatch(fetchMoreOrders());
+    }
   };
 
   const handleOrderPress = (order: Order) => {
@@ -86,11 +99,26 @@ export const OrdersListScreen: React.FC<{ navigation: any }> = ({
         refreshControl={
           <RefreshControl refreshing={isRefreshing} onRefresh={handleRefresh} />
         }
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.4}
+        ListFooterComponent={
+          isLoadingMore ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="small" color={theme.colors.primary} />
+            </View>
+          ) : null
+        }
         ListEmptyComponent={
-          <EmptyState
-            title="No Orders Found"
-            description="There are no orders to display"
-          />
+          isLoading ? (
+            <View style={styles.footerLoader}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+            </View>
+          ) : (
+            <EmptyState
+              title="No Orders Found"
+              description="There are no orders to display"
+            />
+          )
         }
       />
     </View>
@@ -113,6 +141,11 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: theme.spacing.md,
+  },
+  footerLoader: {
+    paddingVertical: theme.spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
   },
   orderCard: {
     marginBottom: theme.spacing.sm,

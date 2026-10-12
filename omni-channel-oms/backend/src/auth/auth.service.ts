@@ -163,6 +163,7 @@ export class AuthService {
     // Only allow updating specific fields
     if (data.firstName) user.firstName = data.firstName;
     if (data.lastName) user.lastName = data.lastName;
+    if (data.fullName !== undefined) user.fullName = data.fullName;
     if (data.phone) user.phone = data.phone;
     if (data.timezone) user.timezone = data.timezone;
     if (data.avatarUrl) user.avatarUrl = data.avatarUrl;

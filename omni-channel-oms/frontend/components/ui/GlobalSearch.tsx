@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import api from "@/lib/api";
 
 interface SearchResult {
   id: string;
@@ -45,25 +46,65 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
 
     setIsLoading(true);
     try {
-      // TODO: Replace with actual API call
-      // Simulated search results
-      const mockResults: SearchResult[] = [
-        {
-          id: "1",
-          type: "order",
-          title: `Order #ORD-${searchQuery}`,
-          subtitle: "Pending • $250.00",
-          url: `/orders/1`,
-        },
-        {
-          id: "2",
-          type: "product",
-          title: `Product matching "${searchQuery}"`,
-          subtitle: "SKU: PRD-001 • $99.99",
-          url: `/products/2`,
-        },
-      ];
-      setResults(mockResults);
+      const searchLower = searchQuery.toLowerCase().trim();
+      const [productsRes, ordersRes] = await Promise.allSettled([
+        api.get<any[]>("/products"),
+        api.get<any>("/orders", { params: { q: searchLower, page: 1, limit: 5 } }),
+      ]);
+
+      const realResults: SearchResult[] = [];
+
+      if (ordersRes.status === "fulfilled") {
+        const rawOrders = ordersRes.value.data;
+        const orders = Array.isArray(rawOrders)
+          ? rawOrders
+          : Array.isArray(rawOrders?.data)
+          ? rawOrders.data
+          : [];
+        const matchingOrders = orders
+          .filter(
+            (o: any) =>
+              o.orderNumber?.toLowerCase().includes(searchLower) ||
+              o.customerName?.toLowerCase().includes(searchLower) ||
+              o.externalOrderId?.toLowerCase().includes(searchLower),
+          )
+          .slice(0, 5);
+
+        for (const order of matchingOrders) {
+          realResults.push({
+            id: order.id,
+            type: "order",
+            title: `Đơn hàng #${order.orderNumber}`,
+            subtitle: `${order.status} • ${order.customerName || order.channel}`,
+            url: `/orders/${order.id}`,
+          });
+        }
+      }
+
+      if (productsRes.status === "fulfilled") {
+        const products = Array.isArray(productsRes.value.data)
+          ? productsRes.value.data
+          : [];
+        const matchingProducts = products
+          .filter(
+            (p: any) =>
+              p.name?.toLowerCase().includes(searchLower) ||
+              p.sku?.toLowerCase().includes(searchLower),
+          )
+          .slice(0, 5);
+
+        for (const product of matchingProducts) {
+          realResults.push({
+            id: product.id,
+            type: "product",
+            title: product.name,
+            subtitle: `SKU: ${product.sku || "N/A"}`,
+            url: `/products/${product.id}`,
+          });
+        }
+      }
+
+      setResults(realResults);
     } catch (error) {
       console.error("Search error:", error);
       setResults([]);

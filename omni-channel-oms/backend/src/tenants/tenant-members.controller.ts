@@ -56,6 +56,20 @@ export class TenantMembersController {
     );
   }
 
+  @ApiOperation({ summary: 'Resend an invite and rotate token' })
+  @Post('tenants/:id/invites/:inviteId/resend')
+  async resendInvite(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('inviteId', ParseUUIDPipe) inviteId: string,
+    @Request() req,
+  ) {
+    return this.tenantMembersService.resendInvite(
+      id,
+      req.user.userId,
+      inviteId,
+    );
+  }
+
   @ApiOperation({ summary: 'Cancel an invite' })
   @Delete('tenants/:id/invites/:inviteId')
   async cancelInvite(

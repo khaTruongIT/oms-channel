@@ -11,9 +11,24 @@ import {
   UserTenantRole,
   UserRole,
 } from '../database/entities/user-tenant-role.entity';
-import { TenantInvite } from '../database/entities/tenant-invite.entity';
+import {
+  TenantInvite,
+  InviteEmailStatus,
+} from '../database/entities/tenant-invite.entity';
 import { User } from '../database/entities/user.entity';
 import { Tenant } from '../database/entities/tenant.entity';
+import { MailService } from '../mail/mail.service';
+
+export interface InviteMemberResponse extends Omit<TenantInvite, 'token'> {
+  inviteLink: string;
+}
+
+export interface ResendInviteResponse {
+  success: boolean;
+  inviteLink: string;
+  emailStatus: InviteEmailStatus;
+  emailError?: string;
+}
 
 @Injectable()
 export class TenantMembersService {
@@ -26,7 +41,12 @@ export class TenantMembersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Tenant)
     private readonly tenantRepository: Repository<Tenant>,
+    private readonly mailService: MailService,
   ) {}
+
+  private hashToken(rawToken: string): string {
+    return crypto.createHash('sha256').update(rawToken.trim()).digest('hex');
+  }
 
   async getMembers(tenantId: string): Promise<any[]> {
     const members = await this.userTenantRoleRepository.find({
@@ -37,20 +57,30 @@ export class TenantMembersService {
     return members.map((member) => ({
       id: member.user.id,
       email: member.user.email,
-      fullName: member.user.email, // TODO: Add fullName to User entity
+      fullName:
+        member.user.fullName ||
+        [member.user.firstName, member.user.lastName].filter(Boolean).join(' ') ||
+        member.user.email,
       role: member.role,
-      joinedAt: member.user.createdAt, // Or create a joinedAt in UserTenantRole if needed
+      joinedAt: member.user.createdAt,
     }));
   }
 
-  async getPendingInvites(tenantId: string): Promise<TenantInvite[]> {
-    return this.tenantInviteRepository.find({
+  async getPendingInvites(tenantId: string): Promise<Omit<TenantInvite, 'token'>[]> {
+    const invites = await this.tenantInviteRepository.find({
       where: {
         tenantId,
-        acceptedAt: null, // Only show unaccepted invites
-        expiresAt: MoreThan(new Date()), // Only show non-expired invites
-      } as any, // TypeORM strict typings sometimes complain about null checks
+        acceptedAt: null,
+        expiresAt: MoreThan(new Date()),
+      } as any,
       order: { createdAt: 'DESC' },
+    });
+
+    // Security (S3.2.5): Never expose plain or hashed invite token in list API
+    return invites.map((invite) => {
+      const { token: omittedToken, ...safeInvite } = invite;
+      void omittedToken;
+      return safeInvite;
     });
   }
 
@@ -59,20 +89,21 @@ export class TenantMembersService {
     invitedByUserId: string,
     email: string,
     role: UserRole,
-  ): Promise<TenantInvite> {
-    // Check if inviter is OWNER or MANAGER (assuming managers can invite)
+  ): Promise<InviteMemberResponse> {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if inviter is OWNER
     const inviterRole = await this.userTenantRoleRepository.findOne({
       where: { tenantId, userId: invitedByUserId },
     });
 
     if (!inviterRole || inviterRole.role !== UserRole.OWNER) {
-      // Only OWNER can invite for now to be safe, or check permissions
       throw new ForbiddenException('Only owners can invite new members');
     }
 
     // Check if user is already a member
     const existingUser = await this.userRepository.findOne({
-      where: { email },
+      where: { email: normalizedEmail },
     });
     if (existingUser) {
       const isMember = await this.userTenantRoleRepository.findOne({
@@ -89,7 +120,7 @@ export class TenantMembersService {
     const existingInvite = await this.tenantInviteRepository.findOne({
       where: {
         tenantId,
-        email,
+        email: normalizedEmail,
         acceptedAt: null,
         expiresAt: MoreThan(new Date()),
       } as any,
@@ -101,25 +132,124 @@ export class TenantMembersService {
       );
     }
 
-    // Generate token
-    const token = crypto.randomBytes(32).toString('hex');
+    // Generate token and store its SHA-256 hash (S3.2.5)
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = this.hashToken(plainToken);
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
 
     const invite = this.tenantInviteRepository.create({
       tenantId,
-      email,
+      email: normalizedEmail,
       role,
       invitedBy: invitedByUserId,
-      token,
+      token: tokenHash,
+      emailStatus: InviteEmailStatus.PENDING,
       expiresAt,
     });
 
     await this.tenantInviteRepository.save(invite);
 
-    // TODO: Send email with invite link (token)
-    // For now, return the token/invite
-    return invite;
+    // Retrieve tenant name for professional invite email
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId },
+    });
+    const tenantName = tenant?.shopName || 'Workspace';
+
+    const appUrl = this.mailService.getConfig().appUrl;
+    const inviteLink = `${appUrl}/invites/accept?token=${plainToken}`;
+
+    // S3.2.3: Send email; do NOT rollback invite on email delivery failure
+    const mailResult = await this.mailService.sendInviteEmail({
+      to: normalizedEmail,
+      tenantName,
+      inviteLink,
+      role,
+    });
+
+    if (mailResult.success) {
+      invite.emailStatus = InviteEmailStatus.SENT;
+      invite.emailSentAt = new Date();
+      invite.emailError = undefined;
+    } else {
+      invite.emailStatus = InviteEmailStatus.EMAIL_FAILED;
+      invite.emailError = mailResult.error || 'Failed to deliver email';
+    }
+
+    await this.tenantInviteRepository.save(invite);
+
+    const { token: omittedToken, ...safeInvite } = invite;
+    void omittedToken;
+
+    return {
+      ...safeInvite,
+      inviteLink,
+    };
+  }
+
+  async resendInvite(
+    tenantId: string,
+    requestedByUserId: string,
+    inviteId: string,
+  ): Promise<ResendInviteResponse> {
+    const requesterRole = await this.userTenantRoleRepository.findOne({
+      where: { tenantId, userId: requestedByUserId },
+    });
+
+    if (!requesterRole || requesterRole.role !== UserRole.OWNER) {
+      throw new ForbiddenException('Only owners can resend invites');
+    }
+
+    const invite = await this.tenantInviteRepository.findOne({
+      where: { id: inviteId, tenantId },
+    });
+
+    if (!invite) {
+      throw new NotFoundException('Invite not found');
+    }
+
+    if (invite.acceptedAt) {
+      throw new BadRequestException('Invite has already been accepted');
+    }
+
+    // S3.2.4: Rotate token, invalidate old token, extend 7 days
+    const newPlainToken = crypto.randomBytes(32).toString('hex');
+    invite.token = this.hashToken(newPlainToken);
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 7);
+    invite.expiresAt = expiresAt;
+
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId },
+    });
+    const tenantName = tenant?.shopName || 'Workspace';
+    const appUrl = this.mailService.getConfig().appUrl;
+    const inviteLink = `${appUrl}/invites/accept?token=${newPlainToken}`;
+
+    const mailResult = await this.mailService.sendInviteEmail({
+      to: invite.email,
+      tenantName,
+      inviteLink,
+      role: invite.role,
+    });
+
+    if (mailResult.success) {
+      invite.emailStatus = InviteEmailStatus.SENT;
+      invite.emailSentAt = new Date();
+      invite.emailError = undefined;
+    } else {
+      invite.emailStatus = InviteEmailStatus.EMAIL_FAILED;
+      invite.emailError = mailResult.error || 'Failed to deliver email';
+    }
+
+    await this.tenantInviteRepository.save(invite);
+
+    return {
+      success: true,
+      inviteLink,
+      emailStatus: invite.emailStatus,
+      emailError: invite.emailError,
+    };
   }
 
   async removeMember(
@@ -205,8 +335,15 @@ export class TenantMembersService {
   }
 
   async acceptInvite(token: string, userId: string): Promise<Tenant> {
+    if (!token || typeof token !== 'string') {
+      throw new BadRequestException('Invite token is required');
+    }
+
+    // S3.2.5: Lookup invite by SHA-256 hash
+    const tokenHash = this.hashToken(token);
+
     const invite = await this.tenantInviteRepository.findOne({
-      where: { token, acceptedAt: null } as any,
+      where: { token: tokenHash, acceptedAt: null } as any,
     });
 
     if (!invite) {
@@ -217,9 +354,9 @@ export class TenantMembersService {
       throw new BadRequestException('Invite has expired');
     }
 
-    // Verify user email matches invite email (optional, but good for security)
+    // Verify user email matches invite email
     const user = await this.userRepository.findOne({ where: { id: userId } });
-    if (!user || user.email !== invite.email) {
+    if (!user || user.email.toLowerCase() !== invite.email.toLowerCase()) {
       throw new BadRequestException(
         'Invite email does not match logged in user',
       );
@@ -231,12 +368,13 @@ export class TenantMembersService {
     });
 
     if (existingRole) {
-      // Already member, just mark accepted
       invite.acceptedAt = new Date();
       await this.tenantInviteRepository.save(invite);
-      return this.tenantRepository.findOne({
+      const tenant = await this.tenantRepository.findOne({
         where: { id: invite.tenantId },
-      }) as Promise<Tenant>;
+      });
+      if (!tenant) throw new NotFoundException('Tenant not found');
+      return tenant;
     }
 
     // Add to tenant

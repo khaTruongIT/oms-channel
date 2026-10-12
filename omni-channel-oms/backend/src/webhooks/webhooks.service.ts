@@ -13,6 +13,8 @@ import { ChannelMappingsService } from '../channel-mappings/channel-mappings.ser
 import { OrdersService } from '../orders/orders.service';
 import { ChannelAccountsService } from '../channel-accounts/channel-accounts.service';
 import { ChannelAccountStatus } from '../database/entities/channel-account.entity';
+import { IntegrationOperationsService } from '../integration-operations/integration-operations.service';
+import { ErrorCode } from '../common/errors/error-codes';
 
 type LegacyWebhookResult =
   | { status: 'skipped'; reason: string }
@@ -35,6 +37,7 @@ export class WebhooksService {
     private readonly channelMappingsService: ChannelMappingsService,
     private readonly ordersService: OrdersService,
     private readonly channelAccountsService: ChannelAccountsService,
+    private readonly integrationOperationsService: IntegrationOperationsService,
   ) {}
 
   async receiveShopeeWebhook(
@@ -94,8 +97,26 @@ export class WebhooksService {
 
     if (!masterSkuId) {
       this.logger.warn(
-        `No mapping found for ${channel} item ${itemId}, variant ${variantId || 'none'}. Skipping order.`,
+        `No mapping found for ${channel} item ${itemId}, variant ${variantId || 'none'}. Creating UNMAPPED_SKU exception and skipping order.`,
       );
+
+      // S3.1.3: Create integration exception with redacted payload
+      await this.integrationOperationsService.createException(schemaName, {
+        type: ErrorCode.UNMAPPED_SKU,
+        severity: 'HIGH',
+        message: `No product mapping found for ${channel} item ${itemId}, variant ${variantId || 'none'}`,
+        context: {
+          channel,
+          orderId,
+          itemId,
+          variantId: variantId || null,
+          quantity,
+          price,
+          customerName: customerName ? `${customerName.slice(0, 1)}***` : undefined,
+          customerPhone: customerPhone ? '***REDACTED***' : undefined,
+        },
+      });
+
       return {
         status: 'skipped',
         reason: 'No product mapping found',
@@ -144,7 +165,8 @@ export class WebhooksService {
         orderId: order.id,
       };
     } catch (error: unknown) {
-      if (error instanceof Error && error.message.includes('already exists')) {
+      // S3.1.4: Check ORDER_DUPLICATE error code
+      if (this.isDuplicateOrderError(error)) {
         this.logger.warn(`Order ${orderId} already exists (idempotency check)`);
         return {
           status: 'duplicate',
@@ -154,5 +176,18 @@ export class WebhooksService {
 
       throw error;
     }
+  }
+
+  private isDuplicateOrderError(error: unknown): boolean {
+    if (error && typeof error === 'object') {
+      const resp = (error as any).response;
+      if (resp && typeof resp === 'object' && resp.code === ErrorCode.ORDER_DUPLICATE) {
+        return true;
+      }
+      if ((error as any).code === ErrorCode.ORDER_DUPLICATE) {
+        return true;
+      }
+    }
+    return error instanceof Error && error.message.includes('already exists');
   }
 }

@@ -9,10 +9,12 @@ import { Tenant } from '../database/entities/tenant.entity';
 import { UserTenantRole } from '../database/entities/user-tenant-role.entity';
 import { TenantInvite } from '../database/entities/tenant-invite.entity';
 import { User } from '../database/entities/user.entity';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Tenant, UserTenantRole, TenantInvite, User]),
+    MailModule,
   ],
   controllers: [TenantsController, TenantMembersController],
   providers: [TenantsService, TenantLimitsService, TenantMembersService],

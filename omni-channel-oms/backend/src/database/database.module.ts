@@ -36,6 +36,12 @@ import { ChannelAccount } from './entities/channel-account.entity';
           migrationsTransactionMode: 'each',
           logging: isDevOrLocal,
           schema: 'public',
+          extra: {
+            statement_timeout: configService.get<number>(
+              'DB_STATEMENT_TIMEOUT',
+              5000,
+            ),
+          },
         };
       },
     }),

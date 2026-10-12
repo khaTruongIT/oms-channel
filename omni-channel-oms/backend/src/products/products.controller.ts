@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ProductsService } from './products.service';
 import { TenantLimitsService } from '../tenants/tenant-limits.service';
@@ -82,7 +83,7 @@ export class ProductsController {
   @ApiResponse({ status: 200, description: 'Returns the product' })
   @ApiResponse({ status: 404, description: 'Product not found' })
   @Get(':id')
-  async getProduct(@Request() req, @Param('id') id: string) {
+  async getProduct(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
@@ -101,7 +102,7 @@ export class ProductsController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async updateProduct(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateProductDto: UpdateProductDto,
   ) {
     const schemaName = req.user.schemaName;
@@ -123,7 +124,7 @@ export class ProductsController {
   })
   @Delete(':id')
   @Roles(UserRole.OWNER)
-  async deleteProduct(@Request() req, @Param('id') id: string) {
+  async deleteProduct(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {

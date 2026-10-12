@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -66,7 +67,7 @@ export class CategoriesController {
   @ApiResponse({ status: 200, description: 'Returns the category' })
   @ApiResponse({ status: 404, description: 'Category not found' })
   @Get(':id')
-  async findOne(@Request() req, @Param('id') id: string) {
+  async findOne(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {
@@ -85,7 +86,7 @@ export class CategoriesController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async update(
     @Request() req,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateCategoryDto: UpdateCategoryDto,
   ) {
     const schemaName = req.user.schemaName;
@@ -104,7 +105,7 @@ export class CategoriesController {
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @Delete(':id')
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
-  async remove(@Request() req, @Param('id') id: string) {
+  async remove(@Request() req, @Param('id', ParseUUIDPipe) id: string) {
     const schemaName = req.user.schemaName;
 
     if (!schemaName) {

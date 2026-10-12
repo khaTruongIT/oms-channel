@@ -3,23 +3,34 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
+import { JobsModule } from '../src/jobs/jobs.module';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideModule(JobsModule)
+      .useModule({ module: class DummyJobsModule {}, providers: [] })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
+  afterAll(async () => {
+    if (app) {
+      await app.close();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  });
+
+  it('/ (GET)', async () => {
+    const res = await request(app.getHttpServer())
       .get('/')
-      .expect(200)
-      .expect('Hello World!');
+      .expect(200);
+    expect(res.text).toBe('Hello World!');
   });
 });

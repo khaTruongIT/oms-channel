@@ -1,6 +1,7 @@
 import { Module, MiddlewareConsumer, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DatabaseModule } from './database/database.module';
@@ -20,6 +21,7 @@ import { HealthModule } from './health/health.module';
 import { ChannelAccountsModule } from './channel-accounts/channel-accounts.module';
 import { IntegrationOperationsModule } from './integration-operations/integration-operations.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
 import { RequestContextMiddleware } from './common/middleware/request-context.middleware';
 import { SecurityHeadersMiddleware } from './common/middleware/security-headers.middleware';
@@ -30,6 +32,13 @@ import { SecurityHeadersMiddleware } from './common/middleware/security-headers.
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ThrottlerModule.forRoot([
+      {
+        name: 'default',
+        ttl: 60000,
+        limit: 100,
+      },
+    ]),
     DatabaseModule,
     AuthModule,
     TenantsModule,
@@ -53,6 +62,10 @@ import { SecurityHeadersMiddleware } from './common/middleware/security-headers.
     {
       provide: APP_FILTER,
       useClass: AllExceptionsFilter,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: AppThrottlerGuard,
     },
   ],
 })

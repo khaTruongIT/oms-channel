@@ -14,4 +14,8 @@ describe('database migration configuration', () => {
       expect.stringContaining('/migrations/[0-9]*-!(*.spec){.ts,.js}'),
     ]);
   });
+
+  it('configures statement_timeout on database pool', () => {
+    expect((dataSourceOptions as any).extra?.statement_timeout).toBe(5000);
+  });
 });

@@ -9,17 +9,26 @@ import {
 import { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { RequestWithContext } from '../interfaces/request-with-context.interface';
+import { ErrorCode } from '../errors/error-codes';
 
-interface HttpExceptionResponseShape {
+export interface HttpExceptionResponseShape {
   message?: string | string[];
   error?: string;
+  code?: string;
+  details?: unknown;
 }
 
-interface ErrorEnvelope {
+export interface ErrorEnvelope {
+  statusCode: number;
+  code: string;
+  message: string | string[];
+  details?: unknown;
+  requestId: string;
   success: false;
   error: {
     code: string;
     message: string | string[];
+    details?: unknown;
   };
   meta: {
     method: string;
@@ -35,7 +44,24 @@ function isHttpExceptionResponseShape(
   return typeof value === 'object' && value !== null;
 }
 
-function getErrorCode(status: number): string {
+function getErrorCode(status: number, exceptionResponse?: unknown): string {
+  if (isHttpExceptionResponseShape(exceptionResponse)) {
+    if (exceptionResponse.code && typeof exceptionResponse.code === 'string') {
+      return exceptionResponse.code;
+    }
+
+    const message = exceptionResponse.message;
+    const messageStr = Array.isArray(message)
+      ? message.join(' ')
+      : typeof message === 'string'
+        ? message
+        : '';
+
+    if (messageStr.toLowerCase().includes('uuid is expected')) {
+      return ErrorCode.INVALID_UUID;
+    }
+  }
+
   return HttpStatus[status] ?? 'INTERNAL_SERVER_ERROR';
 }
 
@@ -48,12 +74,22 @@ function getSafeHttpExceptionMessage(
 
   if (
     isHttpExceptionResponseShape(exceptionResponse) &&
-    exceptionResponse.message
+    exceptionResponse.message !== undefined
   ) {
     return exceptionResponse.message;
   }
 
   return 'Request failed';
+}
+
+function getSafeDetails(exceptionResponse?: unknown): unknown | undefined {
+  if (
+    isHttpExceptionResponseShape(exceptionResponse) &&
+    exceptionResponse.details !== undefined
+  ) {
+    return exceptionResponse.details;
+  }
+  return undefined;
 }
 
 function redactSensitiveDetails(value: string): string {
@@ -73,8 +109,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<RequestWithContext>();
 
-    const status =
-      exception instanceof HttpException
+    const isStatementTimeout =
+      (exception as any)?.driverError?.code === '57014' ||
+      (exception as any)?.code === '57014' ||
+      (typeof (exception as any)?.message === 'string' &&
+        (exception as any).message.toLowerCase().includes('statement timeout'));
+
+    const status = isStatementTimeout
+      ? HttpStatus.GATEWAY_TIMEOUT
+      : exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
@@ -83,14 +126,27 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     const requestId = request.requestId ?? randomUUID();
     const path = request.originalUrl ?? request.url;
+    const code = isStatementTimeout
+      ? ErrorCode.QUERY_TIMEOUT
+      : getErrorCode(status, exceptionResponse);
+    const message = isStatementTimeout
+      ? 'Query execution exceeded statement timeout'
+      : exception instanceof HttpException && exceptionResponse
+        ? getSafeHttpExceptionMessage(exceptionResponse)
+        : 'Internal server error';
+    const details = getSafeDetails(exceptionResponse);
+
     const envelope: ErrorEnvelope = {
+      statusCode: status,
+      code,
+      message,
+      ...(details !== undefined ? { details } : {}),
+      requestId,
       success: false,
       error: {
-        code: getErrorCode(status),
-        message:
-          exception instanceof HttpException && exceptionResponse
-            ? getSafeHttpExceptionMessage(exceptionResponse)
-            : 'Internal server error',
+        code,
+        message,
+        ...(details !== undefined ? { details } : {}),
       },
       meta: {
         method: request.method,

@@ -1,4 +1,8 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import {
+  Injectable,
+  ServiceUnavailableException,
+  BeforeApplicationShutdown,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 
 export interface LivenessStatus {
@@ -16,8 +20,14 @@ export interface ReadinessStatus {
 }
 
 @Injectable()
-export class HealthService {
+export class HealthService implements BeforeApplicationShutdown {
+  private isShuttingDown = false;
+
   constructor(private readonly dataSource: DataSource) {}
+
+  beforeApplicationShutdown(_signal?: string) {
+    this.isShuttingDown = true;
+  }
 
   getLiveness(): LivenessStatus {
     return {
@@ -28,6 +38,15 @@ export class HealthService {
   }
 
   async getReadiness(): Promise<ReadinessStatus> {
+    if (this.isShuttingDown) {
+      throw new ServiceUnavailableException({
+        message: 'Service is shutting down',
+        checks: {
+          database: 'shutting_down',
+        },
+      });
+    }
+
     try {
       await this.dataSource.query('SELECT 1 AS ok');
     } catch {

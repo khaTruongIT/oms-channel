@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   NotFoundException,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { ChannelMappingsService } from './channel-mappings.service';
 import { CreateChannelMappingDto } from './dto/create-channel-mapping.dto';
@@ -92,7 +93,7 @@ export class ChannelMappingsController {
   @Get('product/:masterSkuId')
   async getMappingsByProduct(
     @Request() req: AuthenticatedRequest,
-    @Param('masterSkuId') masterSkuId: string,
+    @Param('masterSkuId', ParseUUIDPipe) masterSkuId: string,
   ) {
     const schemaName = req.user.schemaName;
 
@@ -114,7 +115,7 @@ export class ChannelMappingsController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async deleteMapping(
     @Request() req: AuthenticatedRequest,
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     const schemaName = req.user.schemaName;
 

@@ -3,7 +3,9 @@ import {
   Get,
   NotFoundException,
   Param,
+  ParseUUIDPipe,
   Post,
+  Body,
   Query,
   Request,
   UseGuards,
@@ -13,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { UserRole } from '../database/entities/user-tenant-role.entity';
 import { IntegrationOperationsService } from './integration-operations.service';
+import { MapSkuDto } from './dto/map-sku.dto';
 
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -36,16 +39,31 @@ export class IntegrationOperationsController {
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async retryException(
     @Request() request: { user: { schemaName?: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.retryException(id, this.getSchemaName(request));
+  }
+
+  @Post('integration-exceptions/:id/map-sku')
+  @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
+  async mapSkuAndRetry(
+    @Request() request: { user: { schemaName?: string; tenantId?: string } },
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MapSkuDto,
+  ) {
+    return this.service.mapSkuAndRetry(
+      id,
+      dto.masterSkuId,
+      this.getSchemaName(request),
+      request.user.tenantId,
+    );
   }
 
   @Post('integration-exceptions/:id/resolve')
   @Roles(UserRole.OWNER, UserRole.WAREHOUSE_MANAGER)
   async resolveException(
     @Request() request: { user: { schemaName?: string; userId: string } },
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.service.resolveException(
       id,

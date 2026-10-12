@@ -10,6 +10,12 @@ import { Tenant } from './tenant.entity';
 import { User } from './user.entity';
 import { UserRole } from './user-tenant-role.entity';
 
+export enum InviteEmailStatus {
+  PENDING = 'PENDING',
+  SENT = 'SENT',
+  EMAIL_FAILED = 'EMAIL_FAILED',
+}
+
 @Entity({ schema: 'public', name: 'tenant_invites' })
 export class TenantInvite {
   @PrimaryGeneratedColumn('uuid')
@@ -37,6 +43,20 @@ export class TenantInvite {
 
   @Column({ type: 'varchar', length: 255 })
   token: string;
+
+  @Column({
+    type: 'varchar',
+    length: 20,
+    name: 'email_status',
+    default: InviteEmailStatus.PENDING,
+  })
+  emailStatus: InviteEmailStatus;
+
+  @Column({ type: 'timestamp', name: 'email_sent_at', nullable: true })
+  emailSentAt?: Date;
+
+  @Column({ type: 'text', name: 'email_error', nullable: true })
+  emailError?: string;
 
   @Column({ type: 'timestamp', name: 'expires_at' })
   expiresAt: Date;

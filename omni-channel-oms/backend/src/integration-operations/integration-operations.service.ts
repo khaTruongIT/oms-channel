@@ -1,6 +1,16 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+  Inject,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { ChannelAccountsService } from '../channel-accounts/channel-accounts.service';
+import { ChannelMappingsService } from '../channel-mappings/channel-mappings.service';
+import { OrdersService } from '../orders/orders.service';
+import { ErrorCode } from '../common/errors/error-codes';
 
 type ExceptionStatus = 'OPEN' | 'RETRYING' | 'RESOLVED';
 type ExceptionSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
@@ -47,6 +57,12 @@ export class IntegrationOperationsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly channelAccountsService: ChannelAccountsService,
+    @Optional()
+    @Inject(forwardRef(() => OrdersService))
+    private readonly ordersService?: OrdersService,
+    @Optional()
+    @Inject(forwardRef(() => ChannelMappingsService))
+    private readonly channelMappingsService?: ChannelMappingsService,
   ) {}
 
   async createException(
@@ -100,14 +116,167 @@ export class IntegrationOperationsService {
     id: string,
     schemaName: string,
   ): Promise<IntegrationException> {
-    return this.updateException(
-      id,
-      schemaName,
+    // S3.1.5: Atomic lock preventing concurrent retry execution
+    const lockedRows = await this.dataSource.query<IntegrationExceptionRow[]>(
       `UPDATE "${schemaName}".integration_exceptions
-       SET status = 'RETRYING', retry_count = retry_count + 1, updated_at = NOW()
-       WHERE id = $1 RETURNING *`,
+       SET status = 'RETRYING', updated_at = NOW()
+       WHERE id = $1 AND status <> 'RETRYING'
+       RETURNING *`,
       [id],
     );
+
+    if (lockedRows.length === 0) {
+      const existing = await this.dataSource.query<IntegrationExceptionRow[]>(
+        `SELECT * FROM "${schemaName}".integration_exceptions WHERE id = $1`,
+        [id],
+      );
+      if (existing.length === 0) {
+        throw new NotFoundException('Integration exception not found');
+      }
+      if (existing[0].status === 'RETRYING') {
+        throw new ConflictException(
+          'Integration exception is currently being retried',
+        );
+      }
+      return this.mapException(existing[0]);
+    }
+
+    const exRow = lockedRows[0];
+    const context = (
+      typeof exRow.context === 'string'
+        ? JSON.parse(exRow.context)
+        : exRow.context ?? {}
+    ) as Record<string, any>;
+
+    // Real execution / retry task
+    try {
+      if (
+        exRow.exception_type === ErrorCode.UNMAPPED_SKU &&
+        this.channelMappingsService &&
+        this.ordersService
+      ) {
+        const { channel, itemId, variantId, orderId, quantity, price, customerName, customerPhone } = context;
+
+        if (channel && itemId) {
+          const masterSkuId =
+            await this.channelMappingsService.findMasterSkuByExternalId(
+              channel,
+              itemId,
+              variantId || null,
+              schemaName,
+            );
+
+          if (!masterSkuId) {
+            throw new Error(`Product mapping still missing for item ${itemId}`);
+          }
+
+          const warehouses = await this.dataSource.query<
+            Array<{ id: string }>
+          >(
+            `SELECT id FROM "${schemaName}".warehouses WHERE is_active = TRUE LIMIT 1`,
+          );
+          if (warehouses.length === 0) {
+            throw new NotFoundException('No active warehouse found');
+          }
+
+          try {
+            await this.ordersService.createOrder(
+              {
+                channel,
+                externalOrderId: orderId,
+                customerName: customerName || 'Unknown Customer',
+                customerPhone: customerPhone || 'N/A',
+                items: [
+                  {
+                    masterSkuId,
+                    quantity: quantity || 1,
+                    unitPrice: price || 0,
+                  },
+                ],
+                warehouseId: warehouses[0].id,
+              },
+              '00000000-0000-0000-0000-000000000001',
+              schemaName,
+            );
+          } catch (err: unknown) {
+            const isDuplicate =
+              err instanceof Error && err.message.includes('already exists');
+            const isDuplicateCode =
+              (err as any)?.response?.code === ErrorCode.ORDER_DUPLICATE;
+            if (!isDuplicate && !isDuplicateCode) {
+              throw err;
+            }
+          }
+        }
+      }
+
+      // Success: mark RESOLVED
+      const resolvedRows = await this.dataSource.query<
+        IntegrationExceptionRow[]
+      >(
+        `UPDATE "${schemaName}".integration_exceptions
+         SET status = 'RESOLVED', resolved_at = NOW(), updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id],
+      );
+      return this.mapException(resolvedRows[0]);
+    } catch (err: unknown) {
+      // S3.1.5: Failure: return to OPEN and increment retry_count
+      const failedRows = await this.dataSource.query<
+        IntegrationExceptionRow[]
+      >(
+        `UPDATE "${schemaName}".integration_exceptions
+         SET status = 'OPEN', retry_count = retry_count + 1, updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [id],
+      );
+      return this.mapException(failedRows[0]);
+    }
+  }
+
+  async mapSkuAndRetry(
+    id: string,
+    masterSkuId: string,
+    schemaName: string,
+    tenantId?: string,
+  ): Promise<IntegrationException> {
+    const existing = await this.dataSource.query<IntegrationExceptionRow[]>(
+      `SELECT * FROM "${schemaName}".integration_exceptions WHERE id = $1`,
+      [id],
+    );
+    if (existing.length === 0) {
+      throw new NotFoundException('Integration exception not found');
+    }
+    const row = existing[0];
+    const context = (
+      typeof row.context === 'string'
+        ? JSON.parse(row.context)
+        : row.context ?? {}
+    ) as Record<string, any>;
+
+    if (this.channelMappingsService && context.channel && context.itemId) {
+      try {
+        await this.channelMappingsService.createMapping(
+          {
+            masterSkuId,
+            channel: context.channel,
+            externalItemId: context.itemId,
+            externalVariantId: context.variantId || undefined,
+            channelAccountId: row.channel_account_id || undefined,
+          },
+          schemaName,
+          tenantId,
+        );
+      } catch (err: unknown) {
+        if (!(err instanceof ConflictException)) {
+          throw err;
+        }
+      }
+    }
+
+    return this.retryException(id, schemaName);
   }
 
   async resolveException(

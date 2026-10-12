@@ -14,6 +14,12 @@ export class UpdateProfileDto {
   @MaxLength(100)
   firstName?: string;
 
+  @ApiPropertyOptional({ example: 'John Doe' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  fullName?: string;
+
   @ApiPropertyOptional({ example: 'john.doe@example.com' })
   @IsOptional()
   @IsString()

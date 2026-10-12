@@ -9,6 +9,73 @@ interface StoredTenant {
   id?: string;
 }
 
+export interface StorageLike {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+const nullStorage: StorageLike = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+};
+
+let refreshPromise: Promise<string> | null = null;
+
+export function clearRefreshPromise(): void {
+  refreshPromise = null;
+}
+
+export async function singleFlightRefreshToken(
+  storage: StorageLike = typeof window !== "undefined"
+    ? window.localStorage
+    : nullStorage,
+  refreshApi: (
+    url: string,
+    body: { refresh_token: string },
+  ) => Promise<{ data: { access_token: string } }> = axios.post,
+): Promise<string> {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  refreshPromise = (async () => {
+    const refreshToken = storage.getItem("refreshToken");
+    if (!refreshToken) {
+      throw new Error("No refresh token available");
+    }
+
+    const { data } = await refreshApi(
+      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/auth/refresh`,
+      { refresh_token: refreshToken },
+    );
+
+    const newToken = data.access_token;
+    storage.setItem("token", newToken);
+    api.defaults.headers.common["Authorization"] = `Bearer ${newToken}`;
+    return newToken;
+  })()
+    .catch((refreshError) => {
+      storage.removeItem("token");
+      storage.removeItem("refreshToken");
+      storage.removeItem("currentTenant");
+      if (
+        typeof window !== "undefined" &&
+        window.location?.pathname &&
+        window.location.pathname !== "/login"
+      ) {
+        window.location.href = "/login";
+      }
+      throw refreshError;
+    })
+    .finally(() => {
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
+}
+
 function parseStoredTenant(value: string | null): StoredTenant | null {
   if (!value) return null;
 
@@ -44,7 +111,9 @@ api.interceptors.request.use(
     }
 
     // Add current tenant context to headers
-    const currentTenant = parseStoredTenant(localStorage.getItem("currentTenant"));
+    const currentTenant = parseStoredTenant(
+      localStorage.getItem("currentTenant"),
+    );
     if (currentTenant?.id) {
       config.headers["x-tenant-id"] = currentTenant.id;
     }
@@ -54,14 +123,18 @@ api.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
-// Response interceptor for auto-refresh on 401
+// Response interceptor for auto-refresh on 401 with single-flight locking
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config as RetryableRequestConfig | undefined;
 
     // If 401 error and we haven't already tried to refresh
-    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+    if (
+      error.response?.status === 401 &&
+      originalRequest &&
+      !originalRequest._retry
+    ) {
       originalRequest._retry = true;
 
       try {
@@ -69,36 +142,12 @@ api.interceptors.response.use(
           throw new Error("Cannot refresh browser session on the server");
         }
 
-        const refreshToken = localStorage.getItem("refreshToken");
-
-        if (!refreshToken) {
-          throw new Error("No refresh token available");
-        }
-
-        // Call refresh endpoint
-        const { data } = await axios.post(
-          `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000"}/auth/refresh`,
-          { refresh_token: refreshToken },
-        );
-
-        // Store new access token
-        localStorage.setItem("token", data.access_token);
-
-        // Update authorization header
-        api.defaults.headers.common["Authorization"] =
-          `Bearer ${data.access_token}`;
-        originalRequest.headers["Authorization"] = `Bearer ${data.access_token}`;
+        const newAccessToken = await singleFlightRefreshToken();
+        originalRequest.headers["Authorization"] = `Bearer ${newAccessToken}`;
 
         // Retry the original request
         return api(originalRequest);
       } catch (refreshError) {
-        // Refresh failed - logout user
-        if (typeof window !== "undefined") {
-          localStorage.removeItem("token");
-          localStorage.removeItem("refreshToken");
-          localStorage.removeItem("currentTenant");
-          window.location.href = "/login";
-        }
         return Promise.reject(refreshError);
       }
     }

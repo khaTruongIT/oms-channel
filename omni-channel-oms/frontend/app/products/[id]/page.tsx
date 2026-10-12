@@ -8,6 +8,8 @@
 import { useParams, useRouter } from "next/navigation";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useProduct } from "@/hooks/useProducts";
+import { useProductInventory } from "@/hooks/useInventory";
+import ProductInventory from "@/components/products/ProductInventory";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 import Button from "@/components/ui/Button";
 import {
@@ -25,9 +27,32 @@ export default function ProductDetailsPage() {
   const router = useRouter();
   const productId = params.id as string;
 
-  const { product, isLoading } = useProduct(productId);
+  const { product, isLoading: isProductLoading } = useProduct(productId);
+  const { inventory: warehouseInventory, isLoading: isInventoryLoading } =
+    useProductInventory(productId);
 
-  if (isLoading) {
+  const stockByWarehouse = (warehouseInventory || []).map((item) => ({
+    warehouseId: item.warehouseId,
+    warehouseName: item.warehouseName || item.warehouse?.name || "Warehouse",
+    available:
+      item.ats ??
+      item.availableQuantity ??
+      Math.max(0, item.quantity - item.reservedQuantity - item.safetyStock),
+    reserved: item.reservedQuantity,
+    total: item.quantity,
+  }));
+
+  const totalStock = stockByWarehouse.reduce((acc, curr) => acc + curr.total, 0);
+  const totalAvailable = stockByWarehouse.reduce(
+    (acc, curr) => acc + curr.available,
+    0,
+  );
+  const totalReserved = stockByWarehouse.reduce(
+    (acc, curr) => acc + curr.reserved,
+    0,
+  );
+
+  if (isProductLoading) {
     return (
       <DashboardLayout>
         <div className="space-y-6">
@@ -141,12 +166,24 @@ export default function ProductDetailsPage() {
 
             {/* Inventory by Warehouse */}
             <div className="bg-white rounded-xl shadow-card p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">
-                Inventory by Warehouse
-              </h2>
-              <div className="text-center py-8 text-gray-500">
-                Coming soon - Inventory distribution across warehouses
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Inventory Allocation by Warehouse
+                </h2>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push(`/inventory?q=${product.skuCode}`)}
+                >
+                  Manage in ATS Table
+                </Button>
               </div>
+              <ProductInventory
+                inventory={stockByWarehouse}
+                onTransfer={(fromWarehouse) => {
+                  router.push(`/inventory?warehouseId=${fromWarehouse}&q=${product.skuCode}`);
+                }}
+              />
             </div>
           </div>
 
@@ -159,16 +196,22 @@ export default function ProductDetailsPage() {
               </h3>
               <div className="space-y-4">
                 <div>
-                  <div className="text-sm text-gray-500">Total Stock</div>
-                  <div className="text-2xl font-bold text-gray-900">-</div>
+                  <div className="text-sm text-gray-500">Total Stock (On-Hand)</div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {isInventoryLoading ? "—" : totalStock}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-sm text-gray-500">Available</div>
-                  <div className="text-2xl font-bold text-green-600">-</div>
+                  <div className="text-sm text-gray-500">Available to Sell (ATS)</div>
+                  <div className="text-2xl font-bold text-emerald-700">
+                    {isInventoryLoading ? "—" : totalAvailable}
+                  </div>
                 </div>
                 <div>
-                  <div className="text-sm text-gray-500">Reserved</div>
-                  <div className="text-2xl font-bold text-orange-600">-</div>
+                  <div className="text-sm text-gray-500">Committed / Reserved</div>
+                  <div className="text-2xl font-bold text-amber-700">
+                    {isInventoryLoading ? "—" : totalReserved}
+                  </div>
                 </div>
               </div>
             </div>

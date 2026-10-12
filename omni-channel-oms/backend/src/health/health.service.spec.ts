@@ -46,4 +46,16 @@ describe('HealthService', () => {
       ServiceUnavailableException,
     );
   });
+
+  it('throws service unavailable when application is shutting down', async () => {
+    const dataSource = createDataSourceMock();
+    const service = new HealthService(dataSource as unknown as DataSource);
+
+    (service as any).beforeApplicationShutdown?.('SIGTERM');
+
+    await expect(service.getReadiness()).rejects.toBeInstanceOf(
+      ServiceUnavailableException,
+    );
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
 });

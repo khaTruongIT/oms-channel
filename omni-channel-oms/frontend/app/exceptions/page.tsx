@@ -6,6 +6,7 @@ import { CheckCircle2, Clock3, RefreshCw, ShieldAlert, TriangleAlert } from "luc
 import { toast } from "sonner";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import EmptyState from "@/components/ui/EmptyState";
 import ErrorState from "@/components/ui/ErrorState";
 import { TableSkeleton } from "@/components/ui/Skeleton";
@@ -13,10 +14,12 @@ import {
   IntegrationException,
   IntegrationExceptionSeverity,
   IntegrationExceptionStatus,
+  mapSkuAndRetryIntegrationException,
   resolveIntegrationException,
   retryIntegrationException,
   useIntegrationExceptions,
 } from "@/hooks/useIntegrationOperations";
+import { useProducts } from "@/hooks/useProducts";
 import { getApiErrorMessage } from "@/lib/api-error";
 
 const severityStyles: Record<IntegrationExceptionSeverity, string> = {
@@ -77,7 +80,11 @@ export default function ExceptionsPage() {
     status: statusFilter,
     severity: severityFilter,
   });
+  const { products } = useProducts();
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [mapSkuModalException, setMapSkuModalException] = useState<IntegrationException | null>(null);
+  const [selectedMasterSkuId, setSelectedMasterSkuId] = useState("");
+  const [isMappingSku, setIsMappingSku] = useState(false);
 
   const exceptionSummary = useMemo(
     () => ({
@@ -113,6 +120,29 @@ export default function ExceptionsPage() {
       toast.error(getApiErrorMessage(error, `Unable to ${action} this exception.`));
     } finally {
       setPendingActionId(null);
+    }
+  };
+
+  const handleMapSkuSubmit = async (): Promise<void> => {
+    if (!mapSkuModalException || !selectedMasterSkuId) {
+      toast.error("Please select a Master SKU to map.");
+      return;
+    }
+
+    setIsMappingSku(true);
+    try {
+      await mapSkuAndRetryIntegrationException(
+        mapSkuModalException.id,
+        selectedMasterSkuId,
+      );
+      toast.success("SKU mapped and retry started successfully");
+      setMapSkuModalException(null);
+      setSelectedMasterSkuId("");
+      await mutate();
+    } catch (error: unknown) {
+      toast.error(getApiErrorMessage(error, "Failed to map SKU and retry."));
+    } finally {
+      setIsMappingSku(false);
     }
   };
 
@@ -225,6 +255,18 @@ export default function ExceptionsPage() {
                     </div>
                     {exception.status !== "RESOLVED" && (
                       <div className="flex shrink-0 gap-2">
+                        {exception.type === "UNMAPPED_SKU" && (
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            onClick={() => {
+                              setMapSkuModalException(exception);
+                              setSelectedMasterSkuId("");
+                            }}
+                          >
+                            Map SKU
+                          </Button>
+                        )}
                         <Button
                           size="sm"
                           variant="secondary"
@@ -252,6 +294,71 @@ export default function ExceptionsPage() {
           )}
         </section>
       </div>
+
+      {/* Map SKU & Auto-Retry Modal */}
+      <Modal
+        isOpen={Boolean(mapSkuModalException)}
+        onClose={() => setMapSkuModalException(null)}
+        title="Map External SKU & Auto-Retry"
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleMapSkuSubmit();
+          }}
+        >
+          {mapSkuModalException && (
+            <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm space-y-1">
+              <div>
+                Channel: <strong className="font-semibold text-slate-800">{String(mapSkuModalException.context?.channel || "N/A")}</strong>
+              </div>
+              <div>
+                External Item ID: <code className="text-xs bg-slate-100 px-1 py-0.5 rounded font-mono">{String(mapSkuModalException.context?.itemId || "N/A")}</code>
+              </div>
+              {Boolean(mapSkuModalException.context?.variantId) && (
+                <div>
+                  External Variant ID: <code className="text-xs bg-slate-100 px-1 py-0.5 rounded font-mono">{String(mapSkuModalException.context?.variantId)}</code>
+                </div>
+              )}
+            </div>
+          )}
+
+          <label className="block text-sm font-medium text-heading">
+            Select Master SKU / Product
+            <select
+              value={selectedMasterSkuId}
+              onChange={(e) => setSelectedMasterSkuId(e.target.value)}
+              className="mt-1.5 w-full rounded-lg border border-border px-3 py-2 text-sm focus:border-primary focus:outline-none"
+              required
+            >
+              <option value="">Choose matching Master SKU</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.skuCode} — {p.productName}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <p className="text-xs text-body">
+            Sau khi lưu mapping, hệ thống sẽ tự động chạy lại sự kiện đơn hàng ngoại vi và đánh dấu ngoại lệ là RESOLVED.
+          </p>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setMapSkuModalException(null)}
+            >
+              Cancel
+            </Button>
+            <Button type="submit" isLoading={isMappingSku}>
+              Map SKU & Retry Now
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </DashboardLayout>
   );
 }

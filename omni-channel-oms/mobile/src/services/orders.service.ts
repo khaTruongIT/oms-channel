@@ -8,15 +8,91 @@ import { Order, OrderFilterParams, OrderStatus } from "@types";
 
 export interface UpdateOrderStatusDto {
   status: OrderStatus;
+  reason?: string;
+}
+
+export interface OrdersPaginationMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+export interface PaginatedOrdersResult {
+  orders: Order[];
+  meta: OrdersPaginationMeta;
 }
 
 class OrdersService {
   /**
-   * Get all orders with optional filters
+   * Get all orders with optional filters and pagination
    */
-  async getOrders(params?: OrderFilterParams): Promise<Order[]> {
-    const response = await apiClient.get<Order[]>("/orders", { params });
-    return response.data;
+  async getOrders(params?: OrderFilterParams): Promise<PaginatedOrdersResult> {
+    const queryParams = {
+      page: params?.page ?? 1,
+      limit: params?.limit ?? 20,
+      ...params,
+    };
+
+    const response = await apiClient.get<any>("/orders", { params: queryParams });
+    const rawData = response.data;
+
+    // Case 1: Enveloped pagination response { data: Order[], meta: { ... } }
+    if (rawData && Array.isArray(rawData.data) && rawData.meta) {
+      const meta = rawData.meta;
+      const total = typeof meta.total === "number" ? meta.total : rawData.data.length;
+      const totalPages =
+        typeof meta.totalPages === "number"
+          ? meta.totalPages
+          : Math.ceil(total / queryParams.limit) || 1;
+
+      return {
+        orders: rawData.data,
+        meta: {
+          page: meta.page ?? queryParams.page,
+          limit: meta.limit ?? queryParams.limit,
+          total,
+          totalPages,
+          hasNextPage:
+            typeof meta.hasNextPage === "boolean"
+              ? meta.hasNextPage
+              : queryParams.page < totalPages,
+          hasPrevPage:
+            typeof meta.hasPrevPage === "boolean"
+              ? meta.hasPrevPage
+              : queryParams.page > 1,
+        },
+      };
+    }
+
+    // Case 2: Legacy raw array response Order[]
+    if (Array.isArray(rawData)) {
+      return {
+        orders: rawData,
+        meta: {
+          page: queryParams.page,
+          limit: queryParams.limit,
+          total: rawData.length,
+          totalPages: Math.ceil(rawData.length / queryParams.limit) || 1,
+          hasNextPage: false,
+          hasPrevPage: queryParams.page > 1,
+        },
+      };
+    }
+
+    return {
+      orders: [],
+      meta: {
+        page: 1,
+        limit: queryParams.limit,
+        total: 0,
+        totalPages: 1,
+        hasNextPage: false,
+        hasPrevPage: false,
+      },
+    };
   }
 
   /**
@@ -42,25 +118,6 @@ class OrdersService {
     id: string,
     data: UpdateOrderStatusDto,
   ): Promise<Order> {
-    // First, get current order to validate transition
-    const currentOrder = await this.getOrderById(id);
-
-    // Import validation utility
-    const {
-      isValidStatusTransition,
-      getInvalidTransitionMessage,
-    } = require("@utils/orderStatusValidation");
-
-    // Validate status transition
-    if (!isValidStatusTransition(currentOrder.status, data.status)) {
-      const errorMessage = getInvalidTransitionMessage(
-        currentOrder.status,
-        data.status,
-      );
-      throw new Error(errorMessage);
-    }
-
-    // Proceed with update if validation passes
     const response = await apiClient.put<Order>(`/orders/${id}/status`, data);
     return response.data;
   }

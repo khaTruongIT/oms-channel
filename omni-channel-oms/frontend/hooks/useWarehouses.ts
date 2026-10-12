@@ -6,9 +6,10 @@ export interface Warehouse {
   name: string;
   location?: string;
   address?: string;
-  isDefault: boolean;
-  createdAt: string;
-  updatedAt: string;
+  isDefault?: boolean;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CreateWarehouseData {
@@ -42,6 +43,24 @@ export function useWarehouse(id: string) {
 
   return {
     warehouse: data,
+    isLoading,
+    isError: error,
+    mutate,
+  };
+}
+
+export function useWarehouseSummary(id: string) {
+  const { data, error, isLoading, mutate } = useTenantScopedSWR<{
+    warehouseId: string;
+    totalSkus: number;
+    totalOnHand: number;
+    totalReserved: number;
+    totalAvailable: number;
+    totalStockValue: number;
+  }>(id ? `/warehouses/${id}/summary` : null, fetcher);
+
+  return {
+    summary: data,
     isLoading,
     isError: error,
     mutate,

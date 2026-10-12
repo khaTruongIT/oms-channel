@@ -14,14 +14,18 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  Printer,
+  History,
 } from "lucide-react";
 import { format } from "date-fns";
 import { toast } from "sonner";
 import { useState } from "react";
 import { getApiErrorMessage } from "@/lib/api-error";
+import CancelOrderModal from "@/components/orders/CancelOrderModal";
+import OrderTimeline from "@/components/orders/OrderTimeline";
 import type { OrderStatus } from "@/types/orders";
 
-const statusFlow: OrderStatus[] = [
+const STATUS_PROGRESS_STEPS: OrderStatus[] = [
   "PENDING",
   "CONFIRMED",
   "PROCESSING",
@@ -29,31 +33,35 @@ const statusFlow: OrderStatus[] = [
   "DELIVERED",
 ];
 
+const DEFAULT_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
+  PENDING: ["CONFIRMED", "CANCELLED"],
+  CONFIRMED: ["PROCESSING", "CANCELLED"],
+  PROCESSING: ["SHIPPED", "CANCELLED"],
+  SHIPPED: ["DELIVERED"],
+  DELIVERED: [],
+  CANCELLED: [],
+};
+
 export default function OrderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const orderId = params.id as string;
   const { order, isLoading, mutate } = useOrder(orderId);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
 
-  const handleStatusUpdate = async (newStatus: OrderStatus) => {
+  const handleStatusUpdate = async (newStatus: OrderStatus, reason?: string) => {
     setIsUpdating(true);
     try {
-      await updateOrderStatus(orderId, newStatus);
+      await updateOrderStatus(orderId, newStatus, reason);
       toast.success(`Order status updated to ${newStatus}`);
       await mutate();
     } catch (error: unknown) {
       toast.error(getApiErrorMessage(error, "Failed to update status"));
+      await mutate();
     } finally {
       setIsUpdating(false);
     }
-  };
-
-  const getNextStatus = (currentStatus: OrderStatus): OrderStatus | null => {
-    const currentIndex = statusFlow.indexOf(currentStatus);
-    if (currentIndex === -1 || currentIndex >= statusFlow.length - 1)
-      return null;
-    return statusFlow[currentIndex + 1];
   };
 
   const calculateTotal = (items: Order["items"]) => {
@@ -91,7 +99,15 @@ export default function OrderDetailPage() {
     );
   }
 
-  const nextStatus = getNextStatus(order.status);
+  const allowedTransitions =
+    order.allowedTransitions && order.allowedTransitions.length > 0
+      ? order.allowedTransitions
+      : DEFAULT_TRANSITIONS[order.status] ?? [];
+
+  const nonCancelTransitions = allowedTransitions.filter(
+    (status) => status !== "CANCELLED",
+  );
+  const canCancel = allowedTransitions.includes("CANCELLED");
   const total = calculateTotal(order.items);
 
   return (
@@ -115,32 +131,57 @@ export default function OrderDetailPage() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <OrderStatusBadge status={order.status} />
-            {nextStatus && order.status !== "CANCELLED" && (
+
+            <Button
+              variant="secondary"
+              onClick={() => router.push(`/orders/${order.id}/print?type=packing-slip`)}
+            >
+              <Printer className="w-4 h-4 mr-1.5" />
+              Packing Slip
+            </Button>
+
+            {nonCancelTransitions.map((nextStatus) => (
               <Button
+                key={nextStatus}
                 variant="primary"
                 onClick={() => void handleStatusUpdate(nextStatus)}
                 isLoading={isUpdating}
               >
                 Mark as {nextStatus}
               </Button>
-            )}
-            {order.status === "PENDING" && (
+            ))}
+
+            {canCancel && (
               <Button
                 variant="danger"
-                onClick={() => void handleStatusUpdate("CANCELLED")}
-                isLoading={isUpdating}
+                onClick={() => setIsCancelModalOpen(true)}
+                disabled={isUpdating}
               >
-                <XCircle className="w-4 h-4 mr-2" />
-                Cancel
+                <XCircle className="w-4 h-4 mr-1.5" />
+                Cancel Order
               </Button>
             )}
           </div>
         </div>
 
+        {/* Cancelled Alert Banner */}
+        {order.status === "CANCELLED" && (
+          <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-900 flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+            <div>
+              <h4 className="font-semibold text-sm">Order Cancelled</h4>
+              <p className="text-sm mt-0.5 text-red-800">
+                <strong>Reason:</strong>{" "}
+                {order.cancelReason || "No cancellation reason recorded."}
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Order Info */}
+          {/* Main Info */}
           <div className="lg:col-span-2 space-y-6">
             {/* Customer Info */}
             <div className="bg-white rounded-xl shadow-card p-6">
@@ -155,7 +196,7 @@ export default function OrderDetailPage() {
                   <div>
                     <p className="text-sm text-body">Name</p>
                     <p className="font-medium text-heading">
-                      {order.customerName}
+                      {order.customerName || "Unknown Customer"}
                     </p>
                   </div>
                 </div>
@@ -229,9 +270,20 @@ export default function OrderDetailPage() {
                 ))}
               </div>
             </div>
+
+            {/* Order Activity & Inventory Timeline */}
+            <div className="bg-white rounded-xl shadow-card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <History className="w-5 h-5 text-primary" />
+                <h3 className="text-lg font-semibold text-heading">
+                  Activity & Inventory Timeline
+                </h3>
+              </div>
+              <OrderTimeline orderId={order.id} />
+            </div>
           </div>
 
-          {/* Order Summary */}
+          {/* Right Column / Order Summary */}
           <div className="space-y-6">
             <div className="bg-white rounded-xl shadow-card p-6">
               <h3 className="text-lg font-semibold text-heading mb-4">
@@ -288,14 +340,15 @@ export default function OrderDetailPage() {
               </div>
             </div>
 
-            {/* Status Timeline */}
+            {/* Status Progress Stepper */}
             <div className="bg-white rounded-xl shadow-card p-6">
               <h3 className="text-lg font-semibold text-heading mb-4">
-                Order Timeline
+                Status Flow
               </h3>
               <div className="space-y-4">
-                {statusFlow.map((status, index) => {
-                  const isActive = statusFlow.indexOf(order.status) >= index;
+                {STATUS_PROGRESS_STEPS.map((status, index) => {
+                  const isActive =
+                    STATUS_PROGRESS_STEPS.indexOf(order.status) >= index;
                   const isCurrent = order.status === status;
                   return (
                     <div key={status} className="flex items-center gap-3">
@@ -311,7 +364,13 @@ export default function OrderDetailPage() {
                         )}
                       </div>
                       <span
-                        className={`font-medium ${isCurrent ? "text-primary" : isActive ? "text-heading" : "text-body"}`}
+                        className={`font-medium ${
+                          isCurrent
+                            ? "text-primary"
+                            : isActive
+                            ? "text-heading"
+                            : "text-body"
+                        }`}
                       >
                         {status}
                       </span>
@@ -331,6 +390,15 @@ export default function OrderDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Cancel Order Modal */}
+      <CancelOrderModal
+        isOpen={isCancelModalOpen}
+        onClose={() => setIsCancelModalOpen(false)}
+        onConfirm={(reason) => handleStatusUpdate("CANCELLED", reason)}
+        orderNumber={order.orderNumber}
+        isSubmitting={isUpdating}
+      />
     </DashboardLayout>
   );
 }

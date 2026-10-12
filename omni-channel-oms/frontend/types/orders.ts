@@ -42,6 +42,9 @@ export interface Order {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  syncedAt?: string;
+  cancelReason?: string;
+  allowedTransitions?: OrderStatus[];
 }
 
 export interface OrderFilters {
@@ -51,6 +54,10 @@ export interface OrderFilters {
   status?: OrderStatus | "ALL";
   externalOrderId?: string;
   channelAccountId?: string;
+  q?: string;
+  from?: string;
+  to?: string;
+  sort?: string;
 }
 
 export interface CreateOrderItemInput {
@@ -69,3 +76,33 @@ export interface CreateOrderInput {
   items: CreateOrderItemInput[];
 }
 
+export interface OrderTimelineEvent {
+  id: string;
+  type: "AUDIT" | "INVENTORY";
+  event: string;
+  description: string;
+  actorId?: string;
+  data?: Record<string, any>;
+  timestamp: string;
+}
+
+export interface BulkStatusItemError {
+  id: string;
+  code: string;
+  message: string;
+}
+
+export interface BulkUpdateOrderStatusResult {
+  succeeded: string[];
+  failed: BulkStatusItemError[];
+  total: number;
+  successCount: number;
+  failureCount: number;
+}
+
+export interface BulkUpdateOrderStatusInput {
+  orderIds: string[];
+  status: OrderStatus;
+  reason?: string;
+  idempotencyKey?: string;
+}

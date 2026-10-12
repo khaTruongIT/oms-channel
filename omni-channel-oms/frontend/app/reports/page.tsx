@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import FeatureGate from "@/components/layout/FeatureGate";
 import DateRangePicker from "@/components/reports/DateRangePicker";
 import SalesChart from "@/components/charts/SalesChart";
 import InventoryChart from "@/components/charts/InventoryChart";
@@ -73,7 +74,8 @@ export default function ReportsPage() {
 
   return (
     <DashboardLayout>
-      <div className="space-y-6">
+      <FeatureGate feature="reports">
+        <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
@@ -251,6 +253,7 @@ export default function ReportsPage() {
           </div>
         </div>
       </div>
+      </FeatureGate>
     </DashboardLayout>
   );
 }

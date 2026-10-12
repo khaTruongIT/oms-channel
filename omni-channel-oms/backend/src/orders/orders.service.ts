@@ -7,11 +7,14 @@ import {
 import { DataSource } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderStatusDto } from './dto/update-order-status.dto';
+import { BulkUpdateOrderStatusDto } from './dto/bulk-update-order-status.dto';
 import {
   InventoryService,
   type QueryExecutor,
 } from '../inventory/inventory.service';
 import { ChannelAccountsService } from '../channel-accounts/channel-accounts.service';
+import { Paginated } from '../common/pagination/pagination.dto';
+import { ErrorCode } from '../common/errors/error-codes';
 
 export interface Order {
   id: string;
@@ -25,6 +28,45 @@ export interface Order {
   totalAmount: number;
   createdAt: Date;
   syncedAt?: Date;
+  cancelReason?: string;
+  allowedTransitions?: OrderStatus[];
+}
+
+export interface OrderTimelineEvent {
+  id: string;
+  type: 'AUDIT' | 'INVENTORY';
+  event: string;
+  description: string;
+  actorId?: string;
+  data?: Record<string, any>;
+  timestamp: Date;
+}
+
+export interface BulkStatusItemError {
+  id: string;
+  code: string;
+  message: string;
+}
+
+export interface BulkUpdateOrderStatusResult {
+  succeeded: string[];
+  failed: BulkStatusItemError[];
+  total: number;
+  successCount: number;
+  failureCount: number;
+}
+
+export interface OrderFilters {
+  channel?: string;
+  status?: string;
+  externalOrderId?: string;
+  channelAccountId?: string;
+  q?: string;
+  from?: string | Date;
+  to?: string | Date;
+  sort?: string;
+  page?: number;
+  limit?: number;
 }
 
 export interface OrderItem {
@@ -107,7 +149,10 @@ export class OrdersService {
     );
 
     if (existing.length > 0) {
-      throw new ConflictException('Order already exists');
+      throw new ConflictException({
+        code: ErrorCode.ORDER_DUPLICATE,
+        message: 'Order already exists',
+      });
     }
 
     // Calculate total amount
@@ -214,7 +259,10 @@ export class OrdersService {
     } catch (error) {
       await queryRunner.rollbackTransaction();
       if (this.isUniqueConstraintViolation(error)) {
-        throw new ConflictException('Order already exists');
+        throw new ConflictException({
+          code: ErrorCode.ORDER_DUPLICATE,
+          message: 'Order already exists',
+        });
       }
       throw error;
     } finally {
@@ -222,17 +270,115 @@ export class OrdersService {
     }
   }
 
-  async getAllOrders(schemaName: string, channel?: string): Promise<Order[]> {
-    let query = `SELECT * FROM "${schemaName}".orders`;
+  async getAllOrders(
+    schemaName: string,
+    filterOrChannel?: string | OrderFilters,
+  ): Promise<Order[] | Paginated<Order>> {
+    const filters: OrderFilters =
+      typeof filterOrChannel === 'string'
+        ? { channel: filterOrChannel }
+        : (filterOrChannel ?? {});
+
+    const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (channel) {
-      query += ` WHERE channel = $1`;
-      params.push(channel);
+    if (filters.channel) {
+      params.push(filters.channel);
+      conditions.push(`channel = $${params.length}`);
     }
 
-    query += ` ORDER BY created_at DESC`;
+    if (filters.status) {
+      params.push(filters.status);
+      conditions.push(`status = $${params.length}`);
+    }
 
+    if (filters.externalOrderId) {
+      params.push(filters.externalOrderId);
+      conditions.push(`external_order_id = $${params.length}`);
+    }
+
+    if (filters.channelAccountId) {
+      params.push(filters.channelAccountId);
+      conditions.push(`channel_account_id = $${params.length}`);
+    }
+
+    if (filters.q) {
+      params.push(`%${filters.q}%`);
+      const paramIndex = params.length;
+      conditions.push(
+        `(order_number ILIKE $${paramIndex} OR external_order_id ILIKE $${paramIndex} OR customer_name ILIKE $${paramIndex})`,
+      );
+    }
+
+    if (filters.from) {
+      params.push(new Date(filters.from));
+      conditions.push(`created_at >= $${params.length}`);
+    }
+
+    if (filters.to) {
+      params.push(new Date(filters.to));
+      conditions.push(`created_at <= $${params.length}`);
+    }
+
+    const whereClause =
+      conditions.length > 0 ? ` WHERE ` + conditions.join(' AND ') : '';
+
+    let orderByClause = ' ORDER BY created_at DESC';
+    if (filters.sort) {
+      const [sortField, sortDirection] = filters.sort.split(':');
+      const dir = sortDirection?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+      const sortColumnMap: Record<string, string> = {
+        createdAt: 'created_at',
+        totalAmount: 'total_amount',
+        orderNumber: 'order_number',
+        status: 'status',
+      };
+      const column = sortColumnMap[sortField];
+      if (column) {
+        orderByClause = ` ORDER BY ${column} ${dir}`;
+      }
+    }
+
+    const isPaginated =
+      filters.page !== undefined || filters.limit !== undefined;
+
+    if (isPaginated) {
+      const page = Math.max(1, filters.page ?? 1);
+      const limit = Math.min(100, Math.max(1, filters.limit ?? 25));
+      const offset = (page - 1) * limit;
+
+      const countResult = await this.dataSource.query<
+        [{ count: string | number }]
+      >(
+        `SELECT COUNT(*)::int AS count FROM "${schemaName}".orders${whereClause}`,
+        params,
+      );
+      const total = Number(countResult[0]?.count || 0);
+
+      const paginatedParams = [...params, limit, offset];
+      const dataQuery = `SELECT * FROM "${schemaName}".orders${whereClause}${orderByClause} LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+
+      const results = await this.dataSource.query<OrderRow[]>(
+        dataQuery,
+        paginatedParams,
+      );
+      const orders = results.map((row) => this.mapToOrder(row));
+      const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+
+      return {
+        data: orders,
+        meta: {
+          page,
+          limit,
+          total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPrevPage: page > 1 && totalPages > 0,
+        },
+      };
+    }
+
+    const query = `SELECT * FROM "${schemaName}".orders${whereClause}${orderByClause}`;
     const results = await this.dataSource.query<OrderRow[]>(query, params);
     return results.map((row) => this.mapToOrder(row));
   }
@@ -248,13 +394,111 @@ export class OrdersService {
     return this.getOrderItemsWithExecutor(orderId, schemaName, this.dataSource);
   }
 
+  async getOrderTimeline(
+    id: string,
+    schemaName: string,
+  ): Promise<OrderTimelineEvent[]> {
+    await this.getOrderById(id, schemaName);
+
+    const auditRows = await this.dataSource.query<
+      Array<{
+        id: string;
+        user_id?: string | null;
+        action: string;
+        changes?: string | Record<string, any> | null;
+        created_at: Date | string;
+      }>
+    >(
+      `SELECT id, user_id, action, changes, created_at
+       FROM "${schemaName}".audit_logs
+       WHERE entity_type = 'order' AND entity_id = $1`,
+      [id],
+    );
+
+    const movementRows = await this.dataSource.query<
+      Array<{
+        id: string;
+        movement_type: string;
+        quantity_delta: number;
+        reserved_delta: number;
+        actor_user_id?: string | null;
+        sku?: string | null;
+        created_at: Date | string;
+      }>
+    >(
+      `SELECT im.id, im.movement_type, im.quantity_delta, im.reserved_delta, im.actor_user_id, im.created_at, ms.sku
+       FROM "${schemaName}".inventory_movements im
+       LEFT JOIN "${schemaName}".master_skus ms ON ms.id = im.master_sku_id
+       WHERE im.order_id = $1`,
+      [id],
+    );
+
+    const events: OrderTimelineEvent[] = [];
+
+    for (const row of auditRows) {
+      let data: Record<string, any> | undefined;
+      if (typeof row.changes === 'string') {
+        try {
+          data = JSON.parse(row.changes);
+        } catch {
+          data = { raw: row.changes };
+        }
+      } else if (typeof row.changes === 'object' && row.changes !== null) {
+        data = row.changes;
+      }
+
+      events.push({
+        id: row.id,
+        type: 'AUDIT',
+        event: row.action,
+        description: `Order audit log: ${row.action}`,
+        actorId: row.user_id ?? undefined,
+        data,
+        timestamp:
+          row.created_at instanceof Date
+            ? row.created_at
+            : new Date(row.created_at),
+      });
+    }
+
+    for (const row of movementRows) {
+      events.push({
+        id: row.id,
+        type: 'INVENTORY',
+        event: row.movement_type,
+        description: `Inventory movement: ${row.movement_type} (qty: ${row.quantity_delta}, reserved: ${row.reserved_delta})`,
+        actorId: row.actor_user_id ?? undefined,
+        data: {
+          sku: row.sku ?? undefined,
+          quantityDelta: row.quantity_delta,
+          reservedDelta: row.reserved_delta,
+        },
+        timestamp:
+          row.created_at instanceof Date
+            ? row.created_at
+            : new Date(row.created_at),
+      });
+    }
+
+    events.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+    return events;
+  }
+
   async updateOrderStatus(
     id: string,
     updateOrderStatusDto: UpdateOrderStatusDto,
     userId: string,
     schemaName: string,
   ): Promise<Order> {
-    const { status } = updateOrderStatusDto;
+    const { status, reason } = updateOrderStatusDto;
+    if (status === 'CANCELLED' && (!reason || reason.trim() === '')) {
+      throw new BadRequestException({
+        code: ErrorCode.VALIDATION_FAILED,
+        message: 'reason is required when cancelling an order',
+      });
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -283,10 +527,11 @@ export class OrdersService {
       const result = await this.queryRows<OrderRow>(
         queryRunner,
         `UPDATE "${schemaName}".orders
-         SET status = $1
+         SET status = $1,
+             cancel_reason = COALESCE($3, cancel_reason)
          WHERE id = $2
          RETURNING *`,
-        [status, id],
+        [status, id, reason ?? null],
       );
 
       if (result.length === 0) {
@@ -302,6 +547,7 @@ export class OrdersService {
           JSON.stringify({
             oldStatus: currentOrder.status,
             newStatus: status,
+            reason: reason ?? undefined,
           }),
         ],
       );
@@ -321,6 +567,87 @@ export class OrdersService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  async bulkUpdateOrderStatus(
+    bulkDto: BulkUpdateOrderStatusDto,
+    userId: string,
+    schemaName: string,
+    idempotencyKey?: string,
+  ): Promise<BulkUpdateOrderStatusResult> {
+    const key = idempotencyKey || bulkDto.idempotencyKey;
+
+    if (key) {
+      const existingLogs = await this.dataSource.query<
+        Array<{ changes: string | Record<string, any> }>
+      >(
+        `SELECT changes FROM "${schemaName}".audit_logs
+         WHERE action = 'BULK_ORDER_STATUS_UPDATED'
+           AND changes->>'idempotencyKey' = $1
+         LIMIT 1`,
+        [key],
+      );
+
+      if (existingLogs.length > 0) {
+        const changes = existingLogs[0].changes;
+        const parsed =
+          typeof changes === 'string' ? JSON.parse(changes) : changes;
+        if (parsed?.result) {
+          return parsed.result;
+        }
+      }
+    }
+
+    const { ids, status, reason } = bulkDto;
+    const succeeded: string[] = [];
+    const failed: BulkStatusItemError[] = [];
+
+    for (const id of ids) {
+      try {
+        await this.updateOrderStatus(
+          id,
+          { status, reason },
+          userId,
+          schemaName,
+        );
+        succeeded.push(id);
+      } catch (error: any) {
+        const code =
+          error?.response?.code ||
+          (error instanceof ConflictException
+            ? ErrorCode.ORDER_STATE_CONFLICT
+            : ErrorCode.BAD_REQUEST);
+        const message =
+          error?.response?.message ||
+          error?.message ||
+          'Failed to update order status';
+        failed.push({ id, code, message });
+      }
+    }
+
+    const result: BulkUpdateOrderStatusResult = {
+      succeeded,
+      failed,
+      total: ids.length,
+      successCount: succeeded.length,
+      failureCount: failed.length,
+    };
+
+    if (key) {
+      await this.dataSource.query(
+        `INSERT INTO "${schemaName}".audit_logs (user_id, action, entity_type, entity_id, changes)
+         VALUES ($1, 'BULK_ORDER_STATUS_UPDATED', 'bulk_order', gen_random_uuid(), $2)`,
+        [
+          userId,
+          JSON.stringify({
+            idempotencyKey: key,
+            result,
+          }),
+        ],
+      );
+    }
+
+    return result;
   }
 
   private async deductReservedStock(
@@ -522,9 +849,10 @@ export class OrdersService {
 
     const allowedTransitions = ORDER_STATUS_TRANSITIONS[from as OrderStatus];
     if (!allowedTransitions?.includes(to as OrderStatus)) {
-      throw new BadRequestException(
-        `Cannot transition order from ${from} to ${to}`,
-      );
+      throw new ConflictException({
+        code: ErrorCode.ORDER_STATE_CONFLICT,
+        message: `Cannot transition order from ${from} to ${to}`,
+      });
     }
   }
 
@@ -627,6 +955,9 @@ export class OrdersService {
           : row.synced_at instanceof Date
             ? row.synced_at
             : new Date(row.synced_at),
+      cancelReason: row.cancel_reason ?? undefined,
+      allowedTransitions:
+        ORDER_STATUS_TRANSITIONS[row.status as OrderStatus] ?? [],
     };
   }
 
@@ -655,6 +986,7 @@ interface OrderRow {
   total_amount: string | number;
   created_at: Date | string;
   synced_at?: Date | string | null;
+  cancel_reason?: string | null;
 }
 
 interface OrderItemRow {

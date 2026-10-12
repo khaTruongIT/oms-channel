@@ -24,6 +24,9 @@ export class User {
   @Column({ type: 'varchar', length: 100, name: 'last_name', nullable: true })
   lastName: string;
 
+  @Column({ type: 'varchar', length: 255, name: 'full_name', nullable: true })
+  fullName: string;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone: string;
 

@@ -74,12 +74,21 @@ export default function ProductsPage() {
   const handleBulkDelete = async () => {
     if (confirm(`Delete ${selectedCount} product(s)?`)) {
       try {
-        // TODO: Implement bulk delete API
-        toast.success(`${selectedCount} product(s) deleted`);
+        const results = await Promise.allSettled(
+          Array.from(selectedIds).map((id) => deleteProduct(id)),
+        );
+        const succeeded = results.filter((r) => r.status === "fulfilled").length;
+        const failed = results.filter((r) => r.status === "rejected").length;
+        if (succeeded > 0) {
+          toast.success(`Đã xóa ${succeeded} sản phẩm.`);
+        }
+        if (failed > 0) {
+          toast.error(`Xóa thất bại ${failed} sản phẩm.`);
+        }
         clearSelection();
         mutate();
       } catch (error) {
-        toast.error("Failed to delete products");
+        toast.error("Không thể xóa sản phẩm đã chọn");
       }
     }
   };
