@@ -25,6 +25,7 @@ import Pagination from "@/components/ui/Pagination";
 import ExportButton from "@/components/ui/ExportButton";
 import { useBulkSelection } from "@/hooks/useBulkSelection";
 import BulkActionBar from "@/components/ui/BulkActionBar";
+import { bulkDeleteProducts } from "@/hooks/useBulkOperations";
 
 export default function ProductsPage() {
   const { products, isLoading, mutate } = useProducts();
@@ -74,21 +75,27 @@ export default function ProductsPage() {
   const handleBulkDelete = async () => {
     if (confirm(`Delete ${selectedCount} product(s)?`)) {
       try {
-        const results = await Promise.allSettled(
-          Array.from(selectedIds).map((id) => deleteProduct(id)),
-        );
-        const succeeded = results.filter((r) => r.status === "fulfilled").length;
-        const failed = results.filter((r) => r.status === "rejected").length;
-        if (succeeded > 0) {
-          toast.success(`Đã xóa ${succeeded} sản phẩm.`);
-        }
-        if (failed > 0) {
-          toast.error(`Xóa thất bại ${failed} sản phẩm.`);
+        const selectedSkus = (products || [])
+          .filter((p) => isSelected(p.id))
+          .map((p) => p.skuCode);
+
+        const job = await bulkDeleteProducts(selectedSkus);
+        if (job.status === "COMPLETED") {
+          toast.success(`Đã xóa ${job.processed} sản phẩm.`);
+          if (job.failed > 0) {
+            toast.error(
+              `${job.failed} sản phẩm không thể xóa (có thể do còn tồn kho đặt trước).`,
+            );
+          }
+        } else {
+          toast.error("Quá trình xóa hàng loạt thất bại.");
         }
         clearSelection();
         mutate();
-      } catch (error) {
-        toast.error("Không thể xóa sản phẩm đã chọn");
+      } catch (error: any) {
+        toast.error(
+          error?.response?.data?.message || "Không thể xóa sản phẩm đã chọn",
+        );
       }
     }
   };

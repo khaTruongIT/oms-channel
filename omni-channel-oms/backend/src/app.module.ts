@@ -20,6 +20,11 @@ import { AuditModule } from './common/audit/audit.module';
 import { HealthModule } from './health/health.module';
 import { ChannelAccountsModule } from './channel-accounts/channel-accounts.module';
 import { IntegrationOperationsModule } from './integration-operations/integration-operations.module';
+import { BulkJobsModule } from './bulk-jobs/bulk-jobs.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { CustomersModule } from './customers/customers.module';
+import { SearchModule } from './search/search.module';
+import { ReportsModule } from './reports/reports.module';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
 import { AppThrottlerGuard } from './common/guards/app-throttler.guard';
 import { LoggerMiddleware } from './common/middleware/logger.middleware';
@@ -55,6 +60,11 @@ import { SecurityHeadersMiddleware } from './common/middleware/security-headers.
     HealthModule,
     ChannelAccountsModule,
     IntegrationOperationsModule,
+    BulkJobsModule,
+    NotificationsModule,
+    CustomersModule,
+    SearchModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [

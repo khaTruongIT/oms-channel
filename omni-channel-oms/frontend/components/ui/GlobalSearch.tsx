@@ -1,28 +1,36 @@
 /**
- * Global Search Component
- * Cmd+K keyboard shortcut to search across Orders, Products, Customers, Inventory
+ * Global Search Component - Sprint 5.1 (S5.1.3)
+ * Cmd+K / Slash key shortcut to search across Orders, Products, and Customers
+ * Debounced with AbortController for request cancellation.
  */
 
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Search,
   Package,
   ShoppingCart,
   User,
-  Warehouse,
   X,
+  Loader2,
+  ArrowRight,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
 
-interface SearchResult {
+export interface SearchResult {
   id: string;
-  type: "order" | "product" | "customer" | "inventory";
+  type: "order" | "product" | "customer";
   title: string;
   subtitle: string;
   url: string;
+}
+
+interface SearchApiResponse {
+  query: string;
+  items: SearchResult[];
+  total: number;
 }
 
 interface GlobalSearchProps {
@@ -36,91 +44,69 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
   const [results, setResults] = useState<SearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Search function with debounce
+  // Search API execution with AbortController
   const performSearch = useCallback(async (searchQuery: string) => {
-    if (!searchQuery.trim()) {
+    const trimmed = searchQuery.trim();
+    if (trimmed.length < 2) {
       setResults([]);
+      setIsLoading(false);
       return;
     }
 
+    // Cancel any ongoing search request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     setIsLoading(true);
     try {
-      const searchLower = searchQuery.toLowerCase().trim();
-      const [productsRes, ordersRes] = await Promise.allSettled([
-        api.get<any[]>("/products"),
-        api.get<any>("/orders", { params: { q: searchLower, page: 1, limit: 5 } }),
-      ]);
+      const response = await api.get<SearchApiResponse>("/search", {
+        params: { q: trimmed },
+        signal: controller.signal,
+      });
 
-      const realResults: SearchResult[] = [];
-
-      if (ordersRes.status === "fulfilled") {
-        const rawOrders = ordersRes.value.data;
-        const orders = Array.isArray(rawOrders)
-          ? rawOrders
-          : Array.isArray(rawOrders?.data)
-          ? rawOrders.data
-          : [];
-        const matchingOrders = orders
-          .filter(
-            (o: any) =>
-              o.orderNumber?.toLowerCase().includes(searchLower) ||
-              o.customerName?.toLowerCase().includes(searchLower) ||
-              o.externalOrderId?.toLowerCase().includes(searchLower),
-          )
-          .slice(0, 5);
-
-        for (const order of matchingOrders) {
-          realResults.push({
-            id: order.id,
-            type: "order",
-            title: `Đơn hàng #${order.orderNumber}`,
-            subtitle: `${order.status} • ${order.customerName || order.channel}`,
-            url: `/orders/${order.id}`,
-          });
-        }
+      if (!controller.signal.aborted) {
+        setResults(response.data?.items || []);
+        setSelectedIndex(0);
       }
-
-      if (productsRes.status === "fulfilled") {
-        const products = Array.isArray(productsRes.value.data)
-          ? productsRes.value.data
-          : [];
-        const matchingProducts = products
-          .filter(
-            (p: any) =>
-              p.name?.toLowerCase().includes(searchLower) ||
-              p.sku?.toLowerCase().includes(searchLower),
-          )
-          .slice(0, 5);
-
-        for (const product of matchingProducts) {
-          realResults.push({
-            id: product.id,
-            type: "product",
-            title: product.name,
-            subtitle: `SKU: ${product.sku || "N/A"}`,
-            url: `/products/${product.id}`,
-          });
-        }
+    } catch (error: any) {
+      // Ignore cancellations
+      if (error?.name === "CanceledError" || error?.code === "ERR_CANCELED") {
+        return;
       }
-
-      setResults(realResults);
-    } catch (error) {
-      console.error("Search error:", error);
+      console.error("Global search error:", error);
       setResults([]);
     } finally {
-      setIsLoading(false);
+      if (abortControllerRef.current === controller) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
-  // Debounced search
+  // 300ms Debounce effect
   useEffect(() => {
     const timer = setTimeout(() => {
       performSearch(query);
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+    };
   }, [query, performSearch]);
+
+  // Cleanup abort controller on unmount or close
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   // Keyboard navigation
   useEffect(() => {
@@ -130,12 +116,16 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
       switch (e.key) {
         case "ArrowDown":
           e.preventDefault();
-          setSelectedIndex((prev) => (prev + 1) % results.length);
+          setSelectedIndex((prev) =>
+            results.length > 0 ? (prev + 1) % results.length : 0,
+          );
           break;
         case "ArrowUp":
           e.preventDefault();
-          setSelectedIndex(
-            (prev) => (prev - 1 + results.length) % results.length,
+          setSelectedIndex((prev) =>
+            results.length > 0
+              ? (prev - 1 + results.length) % results.length
+              : 0,
           );
           break;
         case "Enter":
@@ -156,12 +146,15 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, results, selectedIndex, router, onClose]);
 
-  // Reset on close
+  // Reset when dialog closes
   useEffect(() => {
     if (!isOpen) {
       setQuery("");
       setResults([]);
       setSelectedIndex(0);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     }
   }, [isOpen]);
 
@@ -170,13 +163,34 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
   const getIcon = (type: SearchResult["type"]) => {
     switch (type) {
       case "order":
-        return <ShoppingCart className="w-4 h-4" />;
+        return <ShoppingCart className="w-4 h-4 text-blue-600" />;
       case "product":
-        return <Package className="w-4 h-4" />;
+        return <Package className="w-4 h-4 text-emerald-600" />;
       case "customer":
-        return <User className="w-4 h-4" />;
-      case "inventory":
-        return <Warehouse className="w-4 h-4" />;
+        return <User className="w-4 h-4 text-cyan-600" />;
+    }
+  };
+
+  const getBadge = (type: SearchResult["type"]) => {
+    switch (type) {
+      case "order":
+        return (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+            Đơn hàng
+          </span>
+        );
+      case "product":
+        return (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            Sản phẩm
+          </span>
+        );
+      case "customer":
+        return (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-cyan-50 text-cyan-700 border border-cyan-200">
+            Khách hàng
+          </span>
+        );
     }
   };
 
@@ -184,92 +198,109 @@ export default function GlobalSearch({ isOpen, onClose }: GlobalSearchProps) {
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/50 z-50 backdrop-blur-sm"
+        className="fixed inset-0 bg-slate-900/40 z-50 backdrop-blur-sm transition-opacity"
         onClick={onClose}
       />
 
-      {/* Modal */}
+      {/* Modal Dialog */}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 w-full max-w-2xl z-50 px-4">
-        <div className="bg-white rounded-xl shadow-2xl overflow-hidden">
-          {/* Search Input */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-200">
-            <Search className="w-5 h-5 text-gray-400" />
+        <div className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden">
+          {/* Search Input Bar */}
+          <div className="flex items-center gap-3 px-4 py-3.5 border-b border-slate-100 bg-slate-50/50">
+            <Search className="w-5 h-5 text-slate-400 shrink-0" />
             <input
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search orders, products, customers..."
-              className="flex-1 outline-none text-gray-900 placeholder:text-gray-400"
+              placeholder="Tìm kiếm sản phẩm, đơn hàng, khách hàng..."
+              className="flex-1 outline-none text-slate-900 placeholder:text-slate-400 bg-transparent text-sm"
               autoFocus
             />
-            <button
-              onClick={onClose}
-              className="p-1 hover:bg-gray-100 rounded transition-colors"
-            >
-              <X className="w-4 h-4 text-gray-400" />
-            </button>
+            {isLoading && (
+              <Loader2 className="w-4 h-4 text-blue-600 animate-spin shrink-0" />
+            )}
+            {query && !isLoading && (
+              <button
+                onClick={() => setQuery("")}
+                className="p-1 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* Results */}
-          <div className="max-h-96 overflow-y-auto">
-            {isLoading ? (
-              <div className="p-8 text-center text-gray-500">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto" />
+          {/* Results List */}
+          <div className="max-h-96 overflow-y-auto divide-y divide-slate-100">
+            {isLoading && results.length === 0 ? (
+              <div className="p-8 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                <span>Đang tìm kiếm...</span>
               </div>
             ) : results.length > 0 ? (
-              <div className="py-2">
+              <div className="py-1">
                 {results.map((result, index) => (
                   <button
-                    key={result.id}
+                    key={`${result.type}-${result.id}`}
                     onClick={() => {
                       router.push(result.url);
                       onClose();
                     }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors ${
-                      index === selectedIndex ? "bg-gray-50" : ""
+                    className={`w-full flex items-center gap-3 px-4 py-3 text-left transition-colors ${
+                      index === selectedIndex
+                        ? "bg-slate-100 text-slate-900"
+                        : "hover:bg-slate-50 text-slate-700"
                     }`}
                   >
-                    <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center text-gray-600">
+                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0 border border-slate-200">
                       {getIcon(result.type)}
                     </div>
-                    <div className="flex-1 text-left">
-                      <div className="font-medium text-gray-900">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-slate-900 text-sm truncate">
                         {result.title}
                       </div>
-                      <div className="text-sm text-gray-500">
+                      <div className="text-xs text-slate-500 truncate mt-0.5">
                         {result.subtitle}
                       </div>
                     </div>
-                    <div className="text-xs text-gray-400 capitalize">
-                      {result.type}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {getBadge(result.type)}
+                      <ArrowRight className="w-3.5 h-3.5 text-slate-300" />
                     </div>
                   </button>
                 ))}
               </div>
-            ) : query ? (
-              <div className="p-8 text-center text-gray-500">
-                No results found for "{query}"
+            ) : query.trim().length >= 2 ? (
+              <div className="p-8 text-center text-slate-500 text-sm">
+                Không tìm thấy kết quả nào cho "{query}"
               </div>
             ) : (
-              <div className="p-8 text-center text-gray-500">
-                <Search className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                <p className="font-medium text-gray-900 mb-1">
-                  Search anything
+              <div className="p-8 text-center text-slate-500">
+                <Search className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="font-medium text-slate-800 text-sm">
+                  Tìm kiếm toàn hệ thống
                 </p>
-                <p className="text-sm">
-                  Orders, products, customers, inventory...
+                <p className="text-xs text-slate-400 mt-1">
+                  Nhập tối thiểu 2 ký tự để tra cứu đơn hàng, mã SKU sản phẩm hoặc khách hàng
                 </p>
               </div>
             )}
           </div>
 
-          {/* Footer */}
-          <div className="px-4 py-2 bg-gray-50 border-t border-gray-200 flex items-center justify-between text-xs text-gray-500">
+          {/* Footer Guide */}
+          <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
             <div className="flex items-center gap-4">
-              <span>↑↓ Navigate</span>
-              <span>↵ Select</span>
-              <span>Esc Close</span>
+              <span>
+                <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono shadow-xs">↑</kbd>
+                <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono shadow-xs ml-1">↓</kbd> Di chuyển
+              </span>
+              <span>
+                <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono shadow-xs">↵</kbd> Mở
+              </span>
+              <span>
+                <kbd className="px-1.5 py-0.5 bg-white border border-slate-200 rounded text-[10px] font-mono shadow-xs">Esc</kbd> Đóng
+              </span>
             </div>
+            <span className="text-[11px] text-slate-400">Omni-Channel OMS</span>
           </div>
         </div>
       </div>

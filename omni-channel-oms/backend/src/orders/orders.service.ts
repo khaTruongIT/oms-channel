@@ -15,6 +15,7 @@ import {
 import { ChannelAccountsService } from '../channel-accounts/channel-accounts.service';
 import { Paginated } from '../common/pagination/pagination.dto';
 import { ErrorCode } from '../common/errors/error-codes';
+import { normalizeVNPhone } from '../common/utils/phone';
 
 export interface Order {
   id: string;
@@ -22,6 +23,7 @@ export interface Order {
   channel: string;
   channelAccountId?: string;
   externalOrderId: string;
+  customerId?: string;
   customerName?: string;
   customerPhone?: string;
   status: string;
@@ -61,6 +63,7 @@ export interface OrderFilters {
   status?: string;
   externalOrderId?: string;
   channelAccountId?: string;
+  customerId?: string;
   q?: string;
   from?: string | Date;
   to?: string | Date;
@@ -169,18 +172,48 @@ export class OrdersService {
     await queryRunner.startTransaction();
 
     try {
+      // Upsert customer if phone is valid Vietnamese number
+      let customerId: string | null = null;
+      const normalizedPhone = normalizeVNPhone(customerPhone);
+      if (normalizedPhone) {
+        const cleanName = (customerName || 'Khách hàng').trim();
+        const customerRows = (await queryRunner.query(
+          `INSERT INTO "${schemaName}".customers
+             (full_name, phone, raw_phone, total_orders, total_spent, last_order_at)
+           VALUES ($1, $2, $3, 1, $4, NOW())
+           ON CONFLICT (phone)
+           DO UPDATE SET
+             full_name = CASE
+               WHEN "${schemaName}".customers.full_name = 'Khách hàng' AND EXCLUDED.full_name != 'Khách hàng'
+               THEN EXCLUDED.full_name
+               ELSE "${schemaName}".customers.full_name
+             END,
+             total_orders = "${schemaName}".customers.total_orders + 1,
+             total_spent = "${schemaName}".customers.total_spent + EXCLUDED.total_spent,
+             last_order_at = NOW(),
+             updated_at = NOW()
+           RETURNING id`,
+          [cleanName, normalizedPhone, customerPhone || null, totalAmount],
+        )) as Array<{ id: string }>;
+
+        if (customerRows.length > 0) {
+          customerId = customerRows[0].id;
+        }
+      }
+
       // Create order
       const orderResult = await this.queryRows<OrderRow>(
         queryRunner,
         `INSERT INTO "${schemaName}".orders 
-         (order_number, channel, channel_account_id, external_order_id, customer_name, customer_phone, status, total_amount, synced_at)
-         VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7, NOW())
+         (order_number, channel, channel_account_id, external_order_id, customer_id, customer_name, customer_phone, status, total_amount, synced_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8, NOW())
          RETURNING *`,
         [
           orderNumber,
           channel,
           channelAccountId ?? null,
           externalOrderId,
+          customerId,
           customerName,
           customerPhone,
           totalAmount,
@@ -300,6 +333,11 @@ export class OrdersService {
     if (filters.channelAccountId) {
       params.push(filters.channelAccountId);
       conditions.push(`channel_account_id = $${params.length}`);
+    }
+
+    if (filters.customerId) {
+      params.push(filters.customerId);
+      conditions.push(`customer_id = $${params.length}`);
     }
 
     if (filters.q) {
@@ -941,6 +979,7 @@ export class OrdersService {
       channel: row.channel,
       channelAccountId: row.channel_account_id ?? undefined,
       externalOrderId: row.external_order_id,
+      customerId: row.customer_id ?? undefined,
       customerName: row.customer_name ?? undefined,
       customerPhone: row.customer_phone ?? undefined,
       status: row.status,
@@ -980,6 +1019,7 @@ interface OrderRow {
   channel: string;
   channel_account_id?: string | null;
   external_order_id: string;
+  customer_id?: string | null;
   customer_name?: string | null;
   customer_phone?: string | null;
   status: string;

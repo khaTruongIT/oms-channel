@@ -117,4 +117,14 @@ export class GetOrdersQueryDto {
     message: 'channelAccountId must be a valid UUID',
   })
   channelAccountId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Filter by customer ID',
+    example: '11111111-1111-1111-1111-111111111111',
+  })
+  @IsOptional()
+  @IsUUID('4', {
+    message: 'customerId must be a valid UUID',
+  })
+  customerId?: string;
 }

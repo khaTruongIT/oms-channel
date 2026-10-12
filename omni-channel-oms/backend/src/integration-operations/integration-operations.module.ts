@@ -4,12 +4,14 @@ import { IntegrationOperationsService } from './integration-operations.service';
 import { ChannelAccountsModule } from '../channel-accounts/channel-accounts.module';
 import { ChannelMappingsModule } from '../channel-mappings/channel-mappings.module';
 import { OrdersModule } from '../orders/orders.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
     ChannelAccountsModule,
     ChannelMappingsModule,
     forwardRef(() => OrdersModule),
+    NotificationsModule,
   ],
   controllers: [IntegrationOperationsController],
   providers: [IntegrationOperationsService],

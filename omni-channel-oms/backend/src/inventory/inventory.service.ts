@@ -3,8 +3,14 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationType,
+  NotificationSeverity,
+} from '../notifications/entities/notification.entity';
 import { AdjustStockDto } from './dto/adjust-stock.dto';
 import { ReserveStockDto } from './dto/reserve-stock.dto';
 import { GetInventoryQueryDto } from './dto/get-inventory-query.dto';
@@ -100,7 +106,10 @@ interface ReservationInput {
 
 @Injectable()
 export class InventoryService {
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    @Optional() private readonly notificationsService?: NotificationsService,
+  ) {}
 
   async getInventory(
     query: GetInventoryQueryDto,
@@ -715,6 +724,7 @@ export class InventoryService {
       );
 
       await queryRunner.commitTransaction();
+      await this.notifyIfLowStock(result, schemaName);
       return this.mapToInventoryItem(result);
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -959,6 +969,7 @@ export class InventoryService {
       throw new NotFoundException('Inventory record not found');
     }
 
+    await this.notifyIfLowStock(result[0], effectiveSchema);
     return this.mapToInventoryItem(result[0]);
   }
 
@@ -1123,5 +1134,41 @@ export class InventoryService {
           ? row.created_at
           : new Date(row.created_at),
     };
+  }
+
+  private async notifyIfLowStock(
+    row: InventoryRow,
+    schemaName: string,
+  ): Promise<void> {
+    if (!this.notificationsService) return;
+    const qty = Number(row.quantity);
+    const reserved = Number(row.reserved_quantity);
+    const safety = Number(row.safety_stock || 0);
+
+    if (qty - reserved <= safety) {
+      const today = new Date().toISOString().split('T')[0];
+      const sku = row.sku_code || row.master_sku_id;
+      const dedupeKey = `LOW_STOCK:${sku}:${row.warehouse_id}:${today}`;
+      try {
+        await this.notificationsService.create(
+          {
+            type: NotificationType.LOW_STOCK,
+            severity:
+              qty - reserved <= 0
+                ? NotificationSeverity.CRITICAL
+                : NotificationSeverity.WARNING,
+            title: `Cảnh báo tồn kho thấp: SKU ${sku}`,
+            body: `Tồn kho khả dụng của SKU ${sku} tại kho ${
+              row.warehouse_name || row.warehouse_id
+            } chỉ còn ${qty - reserved} (mức an toàn: ${safety}).`,
+            link: '/inventory',
+            dedupeKey,
+          },
+          schemaName,
+        );
+      } catch {
+        // Suppress notification dispatch errors to preserve transaction integrity
+      }
+    }
   }
 }

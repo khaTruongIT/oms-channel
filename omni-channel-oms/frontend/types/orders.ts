@@ -54,6 +54,7 @@ export interface OrderFilters {
   status?: OrderStatus | "ALL";
   externalOrderId?: string;
   channelAccountId?: string;
+  customerId?: string;
   q?: string;
   from?: string;
   to?: string;

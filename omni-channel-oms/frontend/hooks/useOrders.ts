@@ -32,6 +32,7 @@ export function buildOrdersUrl(filters?: OrderFilters): string {
   if (filters?.status && filters.status !== "ALL") params.set("status", filters.status);
   if (filters?.externalOrderId) params.set("externalOrderId", filters.externalOrderId);
   if (filters?.channelAccountId) params.set("channelAccountId", filters.channelAccountId);
+  if (filters?.customerId) params.set("customerId", filters.customerId);
   if (filters?.q) params.set("q", filters.q);
   if (filters?.from) params.set("from", filters.from);
   if (filters?.to) params.set("to", filters.to);

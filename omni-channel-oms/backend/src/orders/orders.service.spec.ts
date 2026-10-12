@@ -112,7 +112,8 @@ describe('OrdersService', () => {
     const inventoryService = createInventoryServiceMock();
 
     queryRunner.query
-      .mockResolvedValueOnce([createOrderRow()])
+      .mockResolvedValueOnce([{ id: 'cust-1' }])
+      .mockResolvedValueOnce([createOrderRow({ customer_id: 'cust-1' })])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
@@ -337,6 +338,25 @@ describe('OrdersService', () => {
       expect(dataSource.query).toHaveBeenCalledWith(
         expect.stringMatching(/WHERE status = \$1/),
         ['SHIPPED'],
+      );
+    });
+
+    it('filters orders by customerId', async () => {
+      const dataSource = {
+        query: jest.fn().mockResolvedValue([createOrderRow()]),
+      };
+      const service = new OrdersService(
+        dataSource as unknown as DataSource,
+        createInventoryServiceMock() as unknown as InventoryService,
+      );
+
+      await service.getAllOrders('tenant_schema', {
+        customerId: '11111111-2222-3333-4444-555555555555',
+      });
+
+      expect(dataSource.query).toHaveBeenCalledWith(
+        expect.stringMatching(/WHERE customer_id = \$1/),
+        ['11111111-2222-3333-4444-555555555555'],
       );
     });
 

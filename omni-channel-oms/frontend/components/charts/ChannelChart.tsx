@@ -36,7 +36,7 @@ export default function ChannelChart({ data }: ChannelChartProps) {
               `${name}: ${(((percent ?? 0) as number) * 100).toFixed(0)}%`
             }
             outerRadius={100}
-            fill="#8884d8"
+            fill="#0284c7"
             dataKey="value"
           >
             {data.map((entry, index) => (
@@ -45,12 +45,15 @@ export default function ChannelChart({ data }: ChannelChartProps) {
           </Pie>
           <Tooltip
             formatter={(value: number | string | undefined) => [
-              `$${Number(value ?? 0).toLocaleString()}`,
-              "Revenue",
+              new Intl.NumberFormat("vi-VN", {
+                style: "currency",
+                currency: "VND",
+              }).format(Number(value ?? 0)),
+              "Doanh thu",
             ]}
             contentStyle={{
               backgroundColor: "white",
-              border: "1px solid #e5e7eb",
+              border: "1px solid #e2e8f0",
               borderRadius: "8px",
               padding: "12px",
             }}

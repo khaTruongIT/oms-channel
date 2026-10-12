@@ -239,12 +239,28 @@ export class TenantsService {
       `);
 
     await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".customers (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          full_name VARCHAR(255) NOT NULL,
+          phone VARCHAR(20) NOT NULL,
+          raw_phone VARCHAR(50) NULL,
+          email VARCHAR(255) NULL,
+          total_orders INT NOT NULL DEFAULT 0,
+          total_spent DECIMAL(15, 2) NOT NULL DEFAULT 0,
+          last_order_at TIMESTAMP NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+
+    await queryRunner.query(`
         CREATE TABLE IF NOT EXISTS "${schemaName}".orders (
           id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
           order_number VARCHAR(100) UNIQUE NOT NULL,
           channel VARCHAR(50) NOT NULL,
           channel_account_id UUID REFERENCES public.channel_accounts(id) ON DELETE SET NULL,
           external_order_id VARCHAR(255) NOT NULL,
+          customer_id UUID REFERENCES "${schemaName}".customers(id) ON DELETE SET NULL,
           customer_name VARCHAR(255),
           customer_phone VARCHAR(50),
           status VARCHAR(50) NOT NULL,
@@ -360,6 +376,40 @@ export class TenantsService {
         )
       `);
 
+    await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".bulk_jobs (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          type VARCHAR(50) NOT NULL,
+          status VARCHAR(50) NOT NULL DEFAULT 'PENDING',
+          total INT NOT NULL DEFAULT 0,
+          processed INT NOT NULL DEFAULT 0,
+          failed INT NOT NULL DEFAULT 0,
+          error_report JSONB NOT NULL DEFAULT '[]'::jsonb,
+          payload JSONB NULL,
+          idempotency_key VARCHAR(255) NULL,
+          started_at TIMESTAMP NULL,
+          completed_at TIMESTAMP NULL,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )
+      `);
+
+    await queryRunner.query(`
+        CREATE TABLE IF NOT EXISTS "${schemaName}".notifications (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          type VARCHAR(64) NOT NULL,
+          severity VARCHAR(32) NOT NULL DEFAULT 'INFO',
+          title VARCHAR(255) NOT NULL,
+          body TEXT NOT NULL,
+          link VARCHAR(255) NULL,
+          dedupe_key VARCHAR(255) NULL,
+          read_at TIMESTAMPTZ NULL,
+          user_id UUID NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+
     // Create indexes
     await queryRunner.query(
       `CREATE INDEX IF NOT EXISTS idx_master_skus_sku_code ON "${schemaName}".master_skus(sku_code)`,
@@ -389,7 +439,57 @@ export class TenantsService {
       `CREATE INDEX IF NOT EXISTS idx_outbox_events_ready ON "${schemaName}".outbox_events(status, available_at)`,
     );
     await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_bulk_jobs_status ON "${schemaName}".bulk_jobs(status)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_bulk_jobs_idempotency ON "${schemaName}".bulk_jobs(idempotency_key)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_bulk_jobs_created_at ON "${schemaName}".bulk_jobs(created_at DESC)`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON "${schemaName}".notifications(dedupe_key) WHERE dedupe_key IS NOT NULL`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON "${schemaName}".notifications(created_at DESC)`,
+    );
+    await queryRunner.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_customers_phone ON "${schemaName}".customers(phone)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_customers_spent ON "${schemaName}".customers(total_spent DESC)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_customers_last_order ON "${schemaName}".customers(last_order_at DESC)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_customers_full_name ON "${schemaName}".customers(full_name)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON "${schemaName}".orders(customer_id)`,
+    );
+    await queryRunner.query(
       `CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON "${schemaName}".audit_logs(entity_type, entity_id)`,
+    );
+
+    // Trigram search indexes (S5.1.1)
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_master_skus_sku_code_trgm ON "${schemaName}".master_skus USING gin (sku_code gin_trgm_ops)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_master_skus_name_trgm ON "${schemaName}".master_skus USING gin (product_name gin_trgm_ops)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_orders_order_number_trgm ON "${schemaName}".orders USING gin (order_number gin_trgm_ops)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_orders_customer_name_trgm ON "${schemaName}".orders USING gin (customer_name gin_trgm_ops)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_customers_full_name_trgm ON "${schemaName}".customers USING gin (full_name gin_trgm_ops)`,
+    );
+    await queryRunner.query(
+      `CREATE INDEX IF NOT EXISTS idx_customers_phone_trgm ON "${schemaName}".customers USING gin (phone gin_trgm_ops)`,
     );
   }
 

@@ -52,6 +52,12 @@ export interface IntegrationHealth {
   lastReconciliationAt?: Date;
 }
 
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  NotificationType,
+  NotificationSeverity,
+} from '../notifications/entities/notification.entity';
+
 @Injectable()
 export class IntegrationOperationsService {
   constructor(
@@ -63,6 +69,8 @@ export class IntegrationOperationsService {
     @Optional()
     @Inject(forwardRef(() => ChannelMappingsService))
     private readonly channelMappingsService?: ChannelMappingsService,
+    @Optional()
+    private readonly notificationsService?: NotificationsService,
   ) {}
 
   async createException(
@@ -87,6 +95,32 @@ export class IntegrationOperationsService {
         JSON.stringify(input.context ?? {}),
       ],
     );
+
+    if (this.notificationsService) {
+      const today = new Date().toISOString().split('T')[0];
+      const channelId = input.channelAccountId || 'general';
+      const dedupeKey = `INTEGRATION_EXCEPTION:${channelId}:${input.type}:${today}`;
+      try {
+        await this.notificationsService.create(
+          {
+            type: NotificationType.INTEGRATION_EXCEPTION,
+            severity:
+              input.severity === 'CRITICAL'
+                ? NotificationSeverity.CRITICAL
+                : input.severity === 'HIGH'
+                ? NotificationSeverity.WARNING
+                : NotificationSeverity.INFO,
+            title: `Lỗi kết nối kênh bán hàng: ${input.type}`,
+            body: input.message,
+            link: '/exceptions',
+            dedupeKey,
+          },
+          schemaName,
+        );
+      } catch {
+        // Notification dispatch failure should not block exception creation
+      }
+    }
   }
 
   async listExceptions(

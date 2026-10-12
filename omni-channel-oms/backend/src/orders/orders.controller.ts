@@ -80,6 +80,11 @@ export class OrdersController {
     required: false,
     description: 'Filter by channel account UUID',
   })
+  @ApiQuery({
+    name: 'customerId',
+    required: false,
+    description: 'Filter by customer UUID',
+  })
   @ApiResponse({ status: 200, description: 'Returns list of orders' })
   @Get()
   async getAllOrders(@Request() req, @Query() query: GetOrdersQueryDto) {
