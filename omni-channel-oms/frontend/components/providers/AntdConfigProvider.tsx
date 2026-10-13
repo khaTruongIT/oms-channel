@@ -2,16 +2,13 @@
 
 import React from "react";
 import { ConfigProvider } from "antd";
+import { antdTokens } from "@/lib/design-tokens";
 
 const AntdConfigProvider = ({ children }: { children: React.ReactNode }) => {
   return (
     <ConfigProvider
       theme={{
-        token: {
-          colorPrimary: "#EC407A",
-          borderRadius: 8,
-          fontFamily: "inherit",
-        },
+        token: { ...antdTokens },
       }}
     >
       {children}

@@ -28,7 +28,7 @@ const PLAN_DETAILS: Record<
   [TenantPlan.PROFESSIONAL]: {
     name: "Professional",
     description: "Advanced features for growing teams",
-    color: "bg-purple-500",
+    color: "bg-sky-500",
   },
   [TenantPlan.ENTERPRISE]: {
     name: "Enterprise",

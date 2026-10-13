@@ -24,6 +24,8 @@ interface TableProps<T extends object> {
   onRowClick?: (row: T) => void;
   emptyMessage?: string;
   getRowId?: (row: T, index: number) => string;
+  /** Row density. Defaults to "comfortable". */
+  density?: "comfortable" | "compact";
 }
 
 function getCellValue<T extends object>(row: T, key: string): unknown {
@@ -40,80 +42,128 @@ export default function Table<T extends object>({
   onRowClick,
   emptyMessage = "No data available",
   getRowId,
+  density = "comfortable",
 }: TableProps<T>) {
+  const cellPadding = density === "compact" ? "px-4 py-2" : "px-6 py-4";
+  const renderCell = (row: T, column: Column<T>) =>
+    column.render
+      ? column.render(getCellValue(row, column.key), row)
+      : String(getCellValue(row, column.key) ?? "");
+
+  if (isLoading || data.length === 0) {
+    return (
+      <div
+        className="px-6 py-12 text-center text-body"
+        role={isLoading ? "status" : undefined}
+      >
+        {isLoading ? (
+          <div className="flex items-center justify-center gap-2">
+            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin motion-reduce:animate-none" />
+            <span>Loading...</span>
+          </div>
+        ) : (
+          emptyMessage
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full">
-        <thead>
-          <tr className="border-b border-gray-200 bg-gray-50/50">
+    <>
+      {/* Mobile (< md): card list, no horizontal scroll */}
+      <ul className="divide-y divide-border md:hidden">
+        {data.map((row, idx) => (
+          <li
+            key={getRowId?.(row, idx) ?? idx}
+            className={`space-y-2 p-4 transition-colors duration-150 ${
+              onRowClick
+                ? "cursor-pointer hover:bg-secondary-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                : ""
+            }`}
+            tabIndex={onRowClick ? 0 : undefined}
+            onClick={() => onRowClick?.(row)}
+            onKeyDown={(e) => {
+              if (onRowClick && e.key === "Enter") onRowClick(row);
+            }}
+          >
             {columns.map((column) => (
-              <th
+              <div
                 key={column.key}
-                className={`px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider ${
-                  column.sortable ? "cursor-pointer hover:text-gray-700" : ""
-                }`}
-                onClick={() => column.sortable && onSort?.(column.key)}
+                className="flex items-start justify-between gap-4 text-sm"
               >
-                <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted">
                   {column.label}
-                  {column.sortable && sortKey === column.key && (
-                    <span className="text-primary">
-                      {sortDirection === "asc" ? (
-                        <ArrowUp className="w-4 h-4" />
-                      ) : (
-                        <ArrowDown className="w-4 h-4" />
-                      )}
-                    </span>
-                  )}
-                </div>
-              </th>
+                </span>
+                <span className="text-right text-heading">
+                  {renderCell(row, column)}
+                </span>
+              </div>
             ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/50">
-          {isLoading ? (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-6 py-12 text-center text-body"
-              >
-                <div className="flex items-center justify-center gap-2">
-                  <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  <span>Loading...</span>
-                </div>
-              </td>
+          </li>
+        ))}
+      </ul>
+
+      {/* Desktop (>= md): table with sticky header */}
+      <div className="hidden max-h-[70vh] overflow-auto md:block">
+        <table className="min-w-full">
+          <thead className="sticky top-0 z-10 bg-secondary-50">
+            <tr className="border-b border-border">
+              {columns.map((column) => (
+                <th
+                  key={column.key}
+                  scope="col"
+                  aria-sort={
+                    column.sortable && sortKey === column.key
+                      ? sortDirection === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : undefined
+                  }
+                  className={`${cellPadding} text-left text-xs font-semibold text-muted uppercase tracking-wider ${
+                    column.sortable
+                      ? "cursor-pointer transition-colors duration-150 hover:text-heading"
+                      : ""
+                  }`}
+                  onClick={() => column.sortable && onSort?.(column.key)}
+                >
+                  <div className="flex items-center gap-2">
+                    {column.label}
+                    {column.sortable && sortKey === column.key && (
+                      <span className="text-primary">
+                        {sortDirection === "asc" ? (
+                          <ArrowUp className="w-4 h-4" />
+                        ) : (
+                          <ArrowDown className="w-4 h-4" />
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </th>
+              ))}
             </tr>
-          ) : data.length === 0 ? (
-            <tr>
-              <td
-                colSpan={columns.length}
-                className="px-6 py-12 text-center text-body"
-              >
-                {emptyMessage}
-              </td>
-            </tr>
-          ) : (
-            data.map((row, idx) => (
+          </thead>
+          <tbody className="divide-y divide-border/50">
+            {data.map((row, idx) => (
               <tr
                 key={getRowId?.(row, idx) ?? idx}
-                className={`hover:bg-secondary-50 transition-colors ${onRowClick ? "cursor-pointer" : ""}`}
+                className={`transition-colors duration-150 hover:bg-secondary-50 ${
+                  onRowClick ? "cursor-pointer" : ""
+                }`}
                 onClick={() => onRowClick?.(row)}
               >
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    className="px-6 py-4 text-sm text-heading"
+                    className={`${cellPadding} text-sm text-heading`}
                   >
-                    {column.render
-                      ? column.render(getCellValue(row, column.key), row)
-                      : String(getCellValue(row, column.key) ?? "")}
+                    {renderCell(row, column)}
                   </td>
                 ))}
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

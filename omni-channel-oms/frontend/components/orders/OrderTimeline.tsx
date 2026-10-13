@@ -84,9 +84,9 @@ export default function OrderTimeline({ orderId }: OrderTimelineProps) {
         };
       }
       return {
-        icon: <Package className="w-4 h-4 text-indigo-600" />,
-        bg: "bg-indigo-50 border-indigo-200",
-        color: "text-indigo-700",
+        icon: <Package className="w-4 h-4 text-primary-600" />,
+        bg: "bg-primary-50 border-primary-200",
+        color: "text-primary-700",
       };
     }
 

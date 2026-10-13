@@ -106,12 +106,12 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
       <div className="mx-auto grid w-full max-w-6xl overflow-hidden rounded-3xl border border-slate-800 bg-slate-900 shadow-2xl shadow-slate-950/40 lg:grid-cols-[0.9fr_1.1fr]">
-        <section className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-br from-indigo-600 via-indigo-700 to-slate-950 p-8 lg:border-b-0 lg:border-r lg:p-12">
+        <section className="relative overflow-hidden border-b border-slate-800 bg-gradient-to-br from-primary-600 via-primary-700 to-slate-950 p-8 lg:border-b-0 lg:border-r lg:p-12">
           <div className="absolute -right-16 top-24 h-56 w-56 rounded-full bg-cyan-300/20 blur-3xl" />
           <div className="relative flex h-full flex-col">
             <Link
               href="/tenants"
-              className="inline-flex w-fit items-center gap-2 text-sm text-indigo-100 transition-colors hover:text-white"
+              className="inline-flex w-fit items-center gap-2 text-sm text-primary-100 transition-colors hover:text-white"
             >
               <ChevronLeft className="h-4 w-4" />
               My stores
@@ -127,17 +127,17 @@ export default function OnboardingPage() {
               <h1 className="mt-4 max-w-sm text-4xl font-semibold leading-tight tracking-tight">
                 Create the operating home for your next store.
               </h1>
-              <p className="mt-5 max-w-md text-base leading-7 text-indigo-100">
+              <p className="mt-5 max-w-md text-base leading-7 text-primary-100">
                 We will provision an isolated workspace, assign you as owner,
                 and prepare it for products, inventory, and sales channels.
               </p>
             </div>
 
-            <ol className="mt-12 space-y-4 text-sm text-indigo-100">
+            <ol className="mt-12 space-y-4 text-sm text-primary-100">
               {["Store profile", "Isolated workspace", "Ready to operate"].map(
                 (step, index) => (
                   <li key={step} className="flex items-center gap-3">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-indigo-200/60 text-xs font-semibold">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full border border-primary-200/60 text-xs font-semibold">
                       {index + 1}
                     </span>
                     {step}
@@ -150,7 +150,7 @@ export default function OnboardingPage() {
 
         <section className="bg-white p-6 text-slate-900 sm:p-10 lg:p-12">
           <div className="max-w-xl">
-            <p className="text-sm font-semibold text-indigo-600">New store</p>
+            <p className="text-sm font-semibold text-primary-600">New store</p>
             <h2 className="mt-2 text-3xl font-semibold tracking-tight">
               Tell us about the workspace
             </h2>

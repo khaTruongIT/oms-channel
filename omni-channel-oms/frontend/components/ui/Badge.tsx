@@ -1,6 +1,13 @@
 "use client";
 
 import { ReactNode } from "react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Info,
+  Circle,
+} from "lucide-react";
 import type { OrderStatus } from "@/types/orders";
 
 interface BadgeProps {
@@ -29,10 +36,20 @@ export default function Badge({
     md: "px-3 py-1.5 text-sm",
   };
 
+  const icons = {
+    default: Circle,
+    success: CheckCircle2,
+    warning: AlertTriangle,
+    danger: XCircle,
+    info: Info,
+  };
+  const Icon = icons[variant];
+
   return (
     <span
-      className={`inline-flex items-center rounded-full font-medium uppercase tracking-wide ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full font-medium uppercase tracking-wide ${variants[variant]} ${sizes[size]} ${className}`}
     >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
       {children}
     </span>
   );

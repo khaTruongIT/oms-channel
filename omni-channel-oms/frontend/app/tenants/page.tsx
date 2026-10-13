@@ -141,7 +141,7 @@ export default function TenantsPage() {
               >
                 <div className="p-6 flex-1">
                   <div className="flex justify-between items-start mb-4">
-                    <div className="bg-gradient-to-br from-blue-500 to-indigo-600 w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-sm">
+                    <div className="bg-gradient-to-br from-primary-500 to-primary-700 w-12 h-12 rounded-lg flex items-center justify-center text-white font-bold text-xl shadow-sm">
                       {tenant.logoUrl ? (
                         <img
                           src={tenant.logoUrl}
